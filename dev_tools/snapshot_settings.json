@@ -1,0 +1,35 @@
+{
+  "exclude_dirs": [
+    ".git",
+    ".venv",
+    "__pycache__",
+    ".pytest_cache",
+    ".mypy_cache",
+    ".ruff_cache",
+    "build",
+    "dist",
+    "snapshots",
+    "cache",
+    "logs",
+    "downloads"
+  ],
+  "exclude_extensions": [
+    ".pyc",
+    ".pyo",
+    ".pyd",
+    ".dll",
+    ".exe",
+    ".zip",
+    ".7z",
+    ".rar",
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".webp",
+    ".gif",
+    ".mp4",
+    ".mkv",
+    ".mp3"
+  ],
+  "max_file_size_mb": 5
+}

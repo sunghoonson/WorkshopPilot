@@ -1,0 +1,12 @@
+{
+  "steamcmd_path": "C:\\Users\\Win11User\\Downloads\\steamcmd\\steamcmd.exe",
+  "active_game": "294100",
+  "games": {
+    "294100": {
+      "name": "RimWorld",
+      "install_path": "C:\\games\\RimWorld",
+      "mods_path": "C:\\games\\RimWorld\\Mods",
+      "install_mode": "copy_folder"
+    }
+  }
+}
