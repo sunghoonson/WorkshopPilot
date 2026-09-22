@@ -1,16 +1,5 @@
 # Changelog
 
-## v0.4 - Steam authentication modes
-
-- `자동 (익명 우선) / 익명 / Steam 계정` 인증 방식 추가
-- 자동 모드는 먼저 `login anonymous`로 시도
-- Access Denied / No subscription / ownership/login 관련 오류를 감지하면 계정 재시도 제안
-- Steam 계정 모드는 비밀번호를 명령줄 인자로 넘기지 않고 SteamCMD 프롬프트에 stdin으로 전달
-- Steam Guard / 2단계 인증 프롬프트 처리
-- 계정명은 설정에 저장 가능
-- 비밀번호와 Steam Guard 코드는 파일에 저장하지 않음
-- 기존 SteamCMD self-update 자동 재시도 유지
-
 ## v0.3.1 - SteamCMD self-update restart fix
 
 - SteamCMD 최초 bootstrap 과정에서 `Update complete, launching...` 후 종료 코드 7이 발생하는 경우를 정상적인 self-update restart로 처리

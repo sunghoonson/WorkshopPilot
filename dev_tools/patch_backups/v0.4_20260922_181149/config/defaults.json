@@ -9,7 +9,5 @@
       "install_mode": "copy_folder"
     }
   },
-  "steamcmd_mode": "managed_preferred",
-  "steam_auth_mode": "auto",
-  "steam_username": ""
+  "steamcmd_mode": "managed_preferred"
 }

@@ -12,7 +12,6 @@ from PySide6.QtNetwork import QNetworkAccessManager, QNetworkRequest, QNetworkRe
 from PySide6.QtWidgets import (
     QApplication,
     QFileDialog,
-    QComboBox,
     QHBoxLayout,
     QInputDialog,
     QLabel,
@@ -130,26 +129,6 @@ class MainWindow(QMainWindow):
         tool_row.addWidget(self.external_steamcmd_btn)
         layout.addLayout(tool_row)
 
-        auth_row = QHBoxLayout()
-        auth_row.addWidget(QLabel("Steam 인증"))
-        self.auth_mode_combo = QComboBox()
-        self.auth_mode_combo.addItem("자동 (익명 우선)", "auto")
-        self.auth_mode_combo.addItem("익명", "anonymous")
-        self.auth_mode_combo.addItem("Steam 계정", "account")
-        self.auth_mode_combo.currentIndexChanged.connect(self._on_auth_mode_changed)
-
-        self.steam_username_edit = QLineEdit()
-        self.steam_username_edit.setPlaceholderText(
-            "Steam 계정명 (자동 fallback / 계정 모드에서 사용)"
-        )
-        self.auth_security_label = QLabel("비밀번호/Steam Guard 코드는 저장하지 않음")
-        self.auth_security_label.setStyleSheet("QLabel { color: #777; }")
-
-        auth_row.addWidget(self.auth_mode_combo)
-        auth_row.addWidget(self.steam_username_edit, 1)
-        auth_row.addWidget(self.auth_security_label)
-        layout.addLayout(auth_row)
-
         mods_row = QHBoxLayout()
         mods_row.addWidget(QLabel("Mods 경로"))
         self.mods_edit = QLineEdit()
@@ -232,12 +211,6 @@ class MainWindow(QMainWindow):
             lambda line: self._log("STEAM", line)
         )
         self.steamcmd_service.completed.connect(self._on_steamcmd_completed)
-        self.steamcmd_service.credential_required.connect(
-            self._on_steam_credential_required
-        )
-        self.steamcmd_service.auth_fallback_required.connect(
-            self._on_auth_fallback_required
-        )
 
     def _load_defaults(self) -> None:
         app_id = self.settings.get("active_game", "294100")
@@ -247,14 +220,6 @@ class MainWindow(QMainWindow):
         self.current_game_name = str(game_cfg.get("name", ""))
         self.game_name_label.setText(self.current_game_name)
         self.mods_edit.setText(game_cfg.get("mods_path", r"C:\games\RimWorld\Mods"))
-
-        auth_mode = str(self.settings.get("steam_auth_mode", "auto") or "auto")
-        index = self.auth_mode_combo.findData(auth_mode)
-        self.auth_mode_combo.setCurrentIndex(index if index >= 0 else 0)
-        self.steam_username_edit.setText(
-            str(self.settings.get("steam_username", "") or "")
-        )
-        self._on_auth_mode_changed()
 
         self._refresh_steam_tool_status()
         self._log("INFO", "초기 설정을 불러왔습니다.")
@@ -356,9 +321,6 @@ class MainWindow(QMainWindow):
         self.settings["active_game"] = app_id
         self.settings["games"] = games
         self.settings["steamcmd_mode"] = "managed_preferred"
-        self.settings["steam_auth_mode"] = self._current_auth_mode()
-        self.settings["steam_username"] = self.steam_username_edit.text().strip()
-        # Password / Steam Guard values are intentionally never persisted.
         save_settings(self.settings)
         self._log("INFO", "config/user_settings.json 에 설정을 저장했습니다.")
 
@@ -569,150 +531,16 @@ class MainWindow(QMainWindow):
         )
 
         try:
-            auth_mode = self._current_auth_mode()
-            username = self.steam_username_edit.text().strip()
-
-            if auth_mode == "account" and not username:
-                username, ok = QInputDialog.getText(
-                    self,
-                    "Steam 계정",
-                    "Steam 계정명을 입력해 주세요.",
-                )
-                username = username.strip()
-                if not ok or not username:
-                    self.download_btn.setEnabled(True)
-                    self.download_btn.setText("선택 모드 다운로드 / 설치")
-                    self._log("INFO", "Steam 계정 로그인을 취소했습니다.")
-                    return
-                self.steam_username_edit.setText(username)
-
-            self._log(
-                "INFO",
-                f"Steam 인증 방식: {self._auth_mode_label(auth_mode)}",
-            )
             self.steamcmd_service.download_workshop_item(
                 steamcmd_exe=steamcmd_exe,
                 app_id=app_id,
                 workshop_id=workshop_id,
-                auth_mode=auth_mode,
-                username=username,
             )
         except Exception as exc:
             self.download_btn.setEnabled(True)
             self.download_btn.setText("선택 모드 다운로드 / 설치")
             self._log("ERROR", f"SteamCMD 실행 실패: {exc}")
             QMessageBox.warning(self, "SteamCMD 실행 실패", str(exc))
-
-    def _on_auth_mode_changed(self, *_args: object) -> None:
-        mode = self._current_auth_mode()
-        # In auto mode the username is optional and used only when anonymous fails.
-        self.steam_username_edit.setEnabled(mode != "anonymous")
-        if mode == "anonymous":
-            self.steam_username_edit.setToolTip(
-                "익명 모드에서는 Steam 계정명이 사용되지 않습니다."
-            )
-        elif mode == "auto":
-            self.steam_username_edit.setToolTip(
-                "비워도 됩니다. 익명 다운로드가 거부될 때 계정명을 물어봅니다."
-            )
-        else:
-            self.steam_username_edit.setToolTip(
-                "Steam 계정명만 저장할 수 있습니다. 비밀번호는 저장하지 않습니다."
-            )
-
-    def _current_auth_mode(self) -> str:
-        value = self.auth_mode_combo.currentData()
-        return str(value or "auto")
-
-    @staticmethod
-    def _auth_mode_label(mode: str) -> str:
-        return {
-            "auto": "자동 (익명 우선)",
-            "anonymous": "익명",
-            "account": "Steam 계정",
-        }.get(mode, mode)
-
-    @Slot(str)
-    def _on_auth_fallback_required(self, reason: str) -> None:
-        self._log("WARN", reason)
-
-        answer = QMessageBox.question(
-            self,
-            "Steam 계정 인증 필요",
-            f"{reason}\n\n"
-            "Steam 계정으로 다시 시도할까요?\n"
-            "계정명은 저장할 수 있지만 비밀번호와 Steam Guard 코드는 저장하지 않습니다.",
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.Yes,
-        )
-        if answer != QMessageBox.Yes:
-            self.steamcmd_service.fail_pending_auth(
-                "익명 다운로드가 거부되었고 Steam 계정 재시도를 취소했습니다."
-            )
-            return
-
-        username = self.steam_username_edit.text().strip()
-        if not username:
-            username, ok = QInputDialog.getText(
-                self,
-                "Steam 계정",
-                "Steam 계정명을 입력해 주세요.",
-            )
-            username = username.strip()
-            if not ok or not username:
-                self.steamcmd_service.fail_pending_auth(
-                    "Steam 계정 로그인을 취소했습니다."
-                )
-                return
-            self.steam_username_edit.setText(username)
-
-        self._log(
-            "INFO",
-            f"Steam 계정 '{username}'으로 Workshop 다운로드를 재시도합니다.",
-        )
-        try:
-            self.steamcmd_service.retry_with_account(username)
-        except Exception as exc:
-            self.steamcmd_service.fail_pending_auth(
-                f"Steam 계정 재시도 시작 실패: {exc}"
-            )
-
-    @Slot(str, str)
-    def _on_steam_credential_required(self, kind: str, prompt: str) -> None:
-        if kind == "password":
-            value, ok = QInputDialog.getText(
-                self,
-                "Steam 로그인",
-                prompt + "\n\n입력값은 저장되지 않습니다.",
-                QLineEdit.Password,
-            )
-        else:
-            value, ok = QInputDialog.getText(
-                self,
-                "Steam Guard",
-                prompt + "\n\n입력값은 저장되지 않습니다.",
-            )
-
-        if not ok or not value:
-            self._log("INFO", f"Steam 인증 입력을 취소했습니다: {kind}")
-            self.steamcmd_service.cancel_current(
-                "사용자가 Steam 인증 입력을 취소했습니다."
-            )
-            return
-
-        try:
-            self.steamcmd_service.submit_credential(kind, value)
-            self._log(
-                "INFO",
-                "Steam 비밀번호를 전달했습니다. (저장 안 함)"
-                if kind == "password"
-                else "Steam Guard 코드를 전달했습니다. (저장 안 함)",
-            )
-        except Exception as exc:
-            self._log("ERROR", f"Steam 인증 입력 전달 실패: {exc}")
-            self.steamcmd_service.cancel_current(
-                f"Steam 인증 입력 전달 실패: {exc}"
-            )
 
     @Slot(bool, str, str)
     def _on_steamcmd_completed(self, success: bool, message: str, source_path: str) -> None:
