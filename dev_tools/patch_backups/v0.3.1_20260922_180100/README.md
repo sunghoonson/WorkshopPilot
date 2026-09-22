@@ -23,14 +23,6 @@ WorkshopPilot
 
 기존 외부 `steamcmd.exe`도 fallback으로 선택할 수 있습니다. 관리형과 외부 도구가 모두 있으면 관리형을 우선 사용합니다.
 
-
-## v0.3.1 SteamCMD 초기화 보강
-
-SteamCMD가 자체 업데이트 직후 Windows에서 종료 코드 `7`로 한 번 종료되며 재실행을 요구할 수 있습니다.
-WorkshopPilot은 이 경우를 설치 실패로 확정하지 않고 자동으로 SteamCMD를 다시 실행합니다.
-
-관리형 SteamCMD는 초기화가 실제로 끝난 뒤에만 준비 완료로 표시됩니다.
-
 ## 빠른 시작
 
 1. `SETUP_VENV.bat`

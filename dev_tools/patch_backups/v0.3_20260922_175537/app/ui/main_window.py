@@ -27,13 +27,9 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from app.core.installer import install_mod_folder
 from app.core.settings import load_settings, save_settings
 from app.core.steam_app_service import SteamAppService
-from app.core.steamcmd_manager import SteamCmdManager
-from app.core.steamcmd_service import SteamCmdService
 from app.core.workshop_service import WorkshopService
-from app.games.registry import get_game_adapter
 from app.models.game import GameSearchResult
 from app.models.workshop_item import WorkshopItem
 
@@ -41,29 +37,18 @@ from app.models.workshop_item import WorkshopItem
 class WorkerSignals(QObject):
     succeeded = Signal(object)
     failed = Signal(str)
-    progress = Signal(str)
 
 
 class FunctionWorker(QRunnable):
-    def __init__(
-        self,
-        fn: Callable[[], Any] | None = None,
-        progress_fn: Callable[[Callable[[str], None]], Any] | None = None,
-    ) -> None:
+    def __init__(self, fn: Callable[[], Any]) -> None:
         super().__init__()
         self.fn = fn
-        self.progress_fn = progress_fn
         self.signals = WorkerSignals()
 
     @Slot()
     def run(self) -> None:
         try:
-            if self.progress_fn is not None:
-                result = self.progress_fn(self.signals.progress.emit)
-            elif self.fn is not None:
-                result = self.fn()
-            else:
-                result = None
+            result = self.fn()
         except Exception as exc:
             self.signals.failed.emit(f"{type(exc).__name__}: {exc}")
             return
@@ -74,13 +59,11 @@ class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle("WorkshopPilot")
-        self.resize(1320, 840)
+        self.resize(1320, 820)
 
         self.settings = load_settings()
         self.app_service = SteamAppService()
         self.workshop_service = WorkshopService()
-        self.steamcmd_manager = SteamCmdManager()
-        self.steamcmd_service = SteamCmdService(self)
         self.thread_pool = QThreadPool.globalInstance()
         self.network = QNetworkAccessManager(self)
 
@@ -89,13 +72,8 @@ class MainWindow(QMainWindow):
         self.pixmap_cache: dict[str, QPixmap] = {}
         self._thumbnail_generation = 0
         self._active_workers: set[FunctionWorker] = set()
-        self._pending_download_id = ""
-        self._active_download_id = ""
-        self._active_download_app_id = ""
-        self._active_mods_root = ""
 
         self._build_ui()
-        self._connect_steamcmd_signals()
         self._load_defaults()
 
     def _build_ui(self) -> None:
@@ -116,18 +94,14 @@ class MainWindow(QMainWindow):
         game_row.addWidget(self.game_search_btn)
         layout.addLayout(game_row)
 
-        tool_row = QHBoxLayout()
-        tool_row.addWidget(QLabel("Steam 도구"))
-        self.steam_status_label = QLabel("확인 중...")
-        self.steam_status_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        self.install_steamcmd_btn = QPushButton("내장 설치/복구")
-        self.install_steamcmd_btn.clicked.connect(self._install_managed_steamcmd)
-        self.external_steamcmd_btn = QPushButton("외부 도구 선택")
-        self.external_steamcmd_btn.clicked.connect(self._pick_external_steamcmd)
-        tool_row.addWidget(self.steam_status_label, 1)
-        tool_row.addWidget(self.install_steamcmd_btn)
-        tool_row.addWidget(self.external_steamcmd_btn)
-        layout.addLayout(tool_row)
+        steam_row = QHBoxLayout()
+        steam_row.addWidget(QLabel("SteamCMD"))
+        self.steamcmd_edit = QLineEdit()
+        steam_btn = QPushButton("찾기")
+        steam_btn.clicked.connect(self._pick_steamcmd)
+        steam_row.addWidget(self.steamcmd_edit, 1)
+        steam_row.addWidget(steam_btn)
+        layout.addLayout(steam_row)
 
         mods_row = QHBoxLayout()
         mods_row.addWidget(QLabel("Mods 경로"))
@@ -179,9 +153,11 @@ class MainWindow(QMainWindow):
         self.open_workshop_btn = QPushButton("Workshop 페이지 열기")
         self.open_workshop_btn.setEnabled(False)
         self.open_workshop_btn.clicked.connect(self._open_selected_workshop)
-        self.download_btn = QPushButton("선택 모드 다운로드 / 설치")
+        self.download_btn = QPushButton("선택 모드 다운로드 (다음 단계)")
         self.download_btn.setEnabled(False)
-        self.download_btn.clicked.connect(self._download_selected_mod)
+        self.download_btn.clicked.connect(
+            lambda: self._log("INFO", "다운로드 기능은 다음 패치에서 QProcess로 연결합니다.")
+        )
         button_row.addWidget(self.open_workshop_btn)
         button_row.addWidget(self.download_btn, 1)
         right_layout.addLayout(button_row)
@@ -193,8 +169,8 @@ class MainWindow(QMainWindow):
         layout.addWidget(QLabel("로그"))
         self.log = QPlainTextEdit()
         self.log.setReadOnly(True)
-        self.log.setMaximumBlockCount(5000)
-        self.log.setMaximumHeight(190)
+        self.log.setMaximumBlockCount(3000)
+        self.log.setMaximumHeight(170)
         layout.addWidget(self.log)
 
         save_btn = QPushButton("현재 설정 저장")
@@ -203,102 +179,26 @@ class MainWindow(QMainWindow):
 
         self.setCentralWidget(root)
 
-    def _connect_steamcmd_signals(self) -> None:
-        self.steamcmd_service.started.connect(
-            lambda: self._log("INFO", "SteamCMD 프로세스가 시작되었습니다.")
-        )
-        self.steamcmd_service.output_line.connect(
-            lambda line: self._log("STEAM", line)
-        )
-        self.steamcmd_service.completed.connect(self._on_steamcmd_completed)
-
     def _load_defaults(self) -> None:
         app_id = self.settings.get("active_game", "294100")
         self.game_edit.setText(app_id)
+        self.steamcmd_edit.setText(self.settings.get("steamcmd_path", ""))
 
         game_cfg = self.settings.get("games", {}).get(app_id, {})
         self.current_game_name = str(game_cfg.get("name", ""))
         self.game_name_label.setText(self.current_game_name)
         self.mods_edit.setText(game_cfg.get("mods_path", r"C:\games\RimWorld\Mods"))
-
-        self._refresh_steam_tool_status()
         self._log("INFO", "초기 설정을 불러왔습니다.")
 
-    def _refresh_steam_tool_status(self) -> None:
-        resolved = self.steamcmd_manager.resolve(
-            str(self.settings.get("steamcmd_path", "") or "")
-        )
-        if resolved is None:
-            self.steam_status_label.setText("○ 설치되지 않음 — 다운로드 시 자동 설치 가능")
-            self.steam_status_label.setToolTip(
-                f"관리형 설치 위치: {self.steamcmd_manager.managed_root}"
-            )
-            return
-
-        mode, path = resolved
-        mode_text = "관리형" if mode == "managed" else "외부"
-        self.steam_status_label.setText(f"● 준비됨 ({mode_text})")
-        self.steam_status_label.setToolTip(str(path))
-
-    def _pick_external_steamcmd(self) -> None:
-        current = str(self.settings.get("steamcmd_path", "") or "")
-        start_dir = str(Path(current).parent) if current else ""
+    def _pick_steamcmd(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
             self,
-            "외부 steamcmd.exe 선택",
-            start_dir,
+            "steamcmd.exe 선택",
+            "",
             "SteamCMD (steamcmd.exe);;실행 파일 (*.exe);;모든 파일 (*)",
         )
-        if not path:
-            return
-
-        self.settings["steamcmd_path"] = path
-        save_settings(self.settings)
-        self._refresh_steam_tool_status()
-        self._log("INFO", f"외부 SteamCMD 경로 저장: {path}")
-
-    def _install_managed_steamcmd(self) -> None:
-        if self.steamcmd_service.is_running:
-            QMessageBox.information(self, "Steam 도구", "모드 다운로드가 진행 중입니다.")
-            return
-
-        self.install_steamcmd_btn.setEnabled(False)
-        self.external_steamcmd_btn.setEnabled(False)
-        self.steam_status_label.setText("◉ 설치/복구 중...")
-        self._log("INFO", "관리형 SteamCMD 설치/복구를 시작합니다.")
-
-        worker = FunctionWorker(
-            progress_fn=lambda emit: self.steamcmd_manager.install_or_repair(emit)
-        )
-        worker.signals.progress.connect(
-            lambda text: self._log("INFO", f"[Steam 도구] {text}")
-        )
-        worker.signals.succeeded.connect(self._on_steamcmd_install_success)
-        worker.signals.failed.connect(self._on_steamcmd_install_error)
-        self._start_worker(worker)
-
-    @Slot(object)
-    def _on_steamcmd_install_success(self, payload: object) -> None:
-        self.install_steamcmd_btn.setEnabled(True)
-        self.external_steamcmd_btn.setEnabled(True)
-        self._refresh_steam_tool_status()
-        self._log("INFO", f"관리형 SteamCMD 준비 완료: {payload}")
-
-        if self._pending_download_id:
-            pending = self._pending_download_id
-            self._pending_download_id = ""
-            current = self.mod_list.currentItem()
-            if current and str(current.data(Qt.UserRole) or "") == pending:
-                self._download_selected_mod()
-
-    @Slot(str)
-    def _on_steamcmd_install_error(self, message: str) -> None:
-        self.install_steamcmd_btn.setEnabled(True)
-        self.external_steamcmd_btn.setEnabled(True)
-        self._pending_download_id = ""
-        self._refresh_steam_tool_status()
-        self._log("ERROR", f"SteamCMD 설치/복구 실패: {message}")
-        QMessageBox.warning(self, "SteamCMD 설치 실패", message)
+        if path:
+            self.steamcmd_edit.setText(path)
 
     def _pick_mods(self) -> None:
         path = QFileDialog.getExistingDirectory(self, "Mods 폴더 선택")
@@ -318,9 +218,9 @@ class MainWindow(QMainWindow):
         game_cfg["mods_path"] = self.mods_edit.text().strip()
         games[app_id] = game_cfg
 
+        self.settings["steamcmd_path"] = self.steamcmd_edit.text().strip()
         self.settings["active_game"] = app_id
         self.settings["games"] = games
-        self.settings["steamcmd_mode"] = "managed_preferred"
         save_settings(self.settings)
         self._log("INFO", "config/user_settings.json 에 설정을 저장했습니다.")
 
@@ -332,7 +232,7 @@ class MainWindow(QMainWindow):
         self.game_search_btn.setEnabled(False)
         self._log("INFO", f"게임 검색 시작: {query}")
 
-        worker = FunctionWorker(fn=lambda: self.app_service.search(query))
+        worker = FunctionWorker(lambda: self.app_service.search(query))
         worker.signals.succeeded.connect(self._on_game_results)
         worker.signals.failed.connect(self._on_game_search_error)
         self._start_worker(worker)
@@ -373,7 +273,6 @@ class MainWindow(QMainWindow):
         QMessageBox.warning(self, "게임 검색 실패", message)
 
     def _apply_game_selection(self, game: GameSearchResult) -> None:
-        previous_app_id = self._resolved_app_id()
         self.game_edit.setText(game.app_id)
         self.current_game_name = game.name
         self.game_name_label.setText(game.name)
@@ -382,12 +281,6 @@ class MainWindow(QMainWindow):
         known_mods_path = str(game_cfg.get("mods_path", "") or "")
         if known_mods_path:
             self.mods_edit.setText(known_mods_path)
-        elif previous_app_id != game.app_id:
-            self.mods_edit.clear()
-            self._log(
-                "WARN",
-                "등록되지 않은 게임입니다. 다운로드 전에 해당 게임의 Mods 경로를 지정해 주세요.",
-            )
 
         self._log("INFO", f"게임 선택: {game.name} / App ID {game.app_id}")
 
@@ -418,7 +311,7 @@ class MainWindow(QMainWindow):
         )
 
         worker = FunctionWorker(
-            fn=lambda: self.workshop_service.search(app_id=app_id, query=query, page=1)
+            lambda: self.workshop_service.search(app_id=app_id, query=query, page=1)
         )
         worker.signals.succeeded.connect(self._on_workshop_results)
         worker.signals.failed.connect(self._on_workshop_search_error)
@@ -445,7 +338,10 @@ class MainWindow(QMainWindow):
                 item.installed = (mods_root / item.published_file_id).is_dir()
 
             self.workshop_items[item.published_file_id] = item
-            list_item = QListWidgetItem(self._list_item_text(item))
+            status = "[설치됨] " if item.installed else ""
+            list_item = QListWidgetItem(
+                f"{status}{item.title}\nWorkshop ID: {item.published_file_id}"
+            )
             list_item.setData(Qt.UserRole, item.published_file_id)
             list_item.setSizeHint(QSize(100, 108))
             self.mod_list.addItem(list_item)
@@ -467,155 +363,6 @@ class MainWindow(QMainWindow):
         self._log("ERROR", f"Workshop 검색 실패: {message}")
         QMessageBox.warning(self, "Workshop 검색 실패", message)
 
-    def _download_selected_mod(self) -> None:
-        if self.steamcmd_service.is_running:
-            QMessageBox.information(self, "다운로드", "이미 SteamCMD 다운로드가 진행 중입니다.")
-            return
-
-        current = self.mod_list.currentItem()
-        if current is None:
-            return
-
-        workshop_id = str(current.data(Qt.UserRole) or "")
-        item = self.workshop_items.get(workshop_id)
-        app_id = self._resolved_app_id()
-        mods_path_text = self.mods_edit.text().strip()
-
-        if item is None or not app_id:
-            return
-        if not mods_path_text:
-            QMessageBox.warning(self, "다운로드", "Mods 경로를 먼저 지정해 주세요.")
-            return
-
-        mods_root = Path(mods_path_text)
-        if not mods_root.exists():
-            answer = QMessageBox.question(
-                self,
-                "Mods 폴더 생성",
-                f"Mods 폴더가 없습니다. 생성할까요?\n\n{mods_root}",
-            )
-            if answer != QMessageBox.Yes:
-                return
-            try:
-                mods_root.mkdir(parents=True, exist_ok=True)
-            except OSError as exc:
-                QMessageBox.warning(self, "Mods 폴더", str(exc))
-                return
-
-        resolved = self.steamcmd_manager.resolve(
-            str(self.settings.get("steamcmd_path", "") or "")
-        )
-        if resolved is None:
-            answer = QMessageBox.question(
-                self,
-                "SteamCMD 자동 설치",
-                "SteamCMD가 준비되어 있지 않습니다.\n"
-                "WorkshopPilot 관리 영역에 자동 설치할까요?",
-            )
-            if answer != QMessageBox.Yes:
-                return
-            self._pending_download_id = workshop_id
-            self._install_managed_steamcmd()
-            return
-
-        mode, steamcmd_exe = resolved
-        self._active_download_id = workshop_id
-        self._active_download_app_id = app_id
-        self._active_mods_root = str(mods_root)
-
-        self.download_btn.setEnabled(False)
-        self.download_btn.setText("SteamCMD 다운로드 중...")
-        self._log(
-            "INFO",
-            f"모드 다운로드 시작: {item.title} / {workshop_id} / SteamCMD={mode}",
-        )
-
-        try:
-            self.steamcmd_service.download_workshop_item(
-                steamcmd_exe=steamcmd_exe,
-                app_id=app_id,
-                workshop_id=workshop_id,
-            )
-        except Exception as exc:
-            self.download_btn.setEnabled(True)
-            self.download_btn.setText("선택 모드 다운로드 / 설치")
-            self._log("ERROR", f"SteamCMD 실행 실패: {exc}")
-            QMessageBox.warning(self, "SteamCMD 실행 실패", str(exc))
-
-    @Slot(bool, str, str)
-    def _on_steamcmd_completed(self, success: bool, message: str, source_path: str) -> None:
-        if not success:
-            self.download_btn.setEnabled(True)
-            self.download_btn.setText("선택 모드 다운로드 / 설치")
-            self._log("ERROR", message)
-            QMessageBox.warning(self, "모드 다운로드 실패", message)
-            return
-
-        self._log("INFO", message)
-        self.download_btn.setText("Mods 폴더 설치 중...")
-
-        app_id = self._active_download_app_id
-        workshop_id = self._active_download_id
-        mods_root = Path(self._active_mods_root)
-        source = Path(source_path)
-        adapter = get_game_adapter(app_id)
-        validator = adapter.validate_mod_folder if adapter is not None else None
-
-        worker = FunctionWorker(
-            fn=lambda: install_mod_folder(
-                source=source,
-                mods_root=mods_root,
-                destination_name=workshop_id,
-                validator=validator,
-            )
-        )
-        worker.signals.succeeded.connect(self._on_mod_install_success)
-        worker.signals.failed.connect(self._on_mod_install_error)
-        self._start_worker(worker)
-
-    @Slot(object)
-    def _on_mod_install_success(self, payload: object) -> None:
-        workshop_id = self._active_download_id
-        item = self.workshop_items.get(workshop_id)
-        if item is not None:
-            item.installed = True
-            self._refresh_list_item(workshop_id)
-
-        self.download_btn.setEnabled(True)
-        self.download_btn.setText("선택 모드 다운로드 / 설치")
-        self._log("INFO", f"Mods 폴더 설치 완료: {payload}")
-
-        current = self.mod_list.currentItem()
-        if current is not None:
-            self._on_mod_selected(current, None)
-
-        QMessageBox.information(
-            self,
-            "설치 완료",
-            f"모드 설치가 완료되었습니다.\n\n{payload}",
-        )
-
-    @Slot(str)
-    def _on_mod_install_error(self, message: str) -> None:
-        self.download_btn.setEnabled(True)
-        self.download_btn.setText("선택 모드 다운로드 / 설치")
-        self._log("ERROR", f"Mods 폴더 설치 실패: {message}")
-        QMessageBox.warning(self, "모드 설치 실패", message)
-
-    def _refresh_list_item(self, workshop_id: str) -> None:
-        item = self.workshop_items.get(workshop_id)
-        if item is None:
-            return
-        for row in range(self.mod_list.count()):
-            list_item = self.mod_list.item(row)
-            if str(list_item.data(Qt.UserRole) or "") == workshop_id:
-                list_item.setText(self._list_item_text(item))
-                break
-
-    @staticmethod
-    def _list_item_text(item: WorkshopItem) -> str:
-        status = "[설치됨] " if item.installed else ""
-        return f"{status}{item.title}\nWorkshop ID: {item.published_file_id}"
 
     def _start_worker(self, worker: FunctionWorker) -> None:
         self._active_workers.add(worker)
@@ -689,16 +436,14 @@ class MainWindow(QMainWindow):
             return
 
         self.open_workshop_btn.setEnabled(True)
-        self.download_btn.setEnabled(not self.steamcmd_service.is_running)
+        self.download_btn.setEnabled(True)
 
         pixmap = self.pixmap_cache.get(published_id)
         if pixmap is not None:
             self._set_preview_pixmap(pixmap)
         else:
             self.preview_label.setPixmap(QPixmap())
-            self.preview_label.setText(
-                "미리보기 로딩 중..." if item.preview_url else "미리보기 없음"
-            )
+            self.preview_label.setText("미리보기 로딩 중..." if item.preview_url else "미리보기 없음")
 
         updated = self._format_timestamp(item.time_updated)
         created = self._format_timestamp(item.time_created)
@@ -769,29 +514,14 @@ class MainWindow(QMainWindow):
     def _plain_description(value: str) -> str:
         if not value:
             return ""
-        text = re.sub(
-            r"\[/?(?:h\d|b|i|u|strike|spoiler|quote|code|list|olist)\]",
-            "",
-            value,
-            flags=re.I,
-        )
-        text = re.sub(
-            r"\[url(?:=[^\]]+)?\](.*?)\[/url\]",
-            r"\1",
-            text,
-            flags=re.I | re.S,
-        )
+        text = re.sub(r"\[/?(?:h\d|b|i|u|strike|spoiler|quote|code|list|olist)\]", "", value, flags=re.I)
+        text = re.sub(r"\[url(?:=[^\]]+)?\](.*?)\[/url\]", r"\1", text, flags=re.I | re.S)
         text = re.sub(r"\[img\].*?\[/img\]", "[이미지]", text, flags=re.I | re.S)
         return text.strip()
 
     def _log(self, level: str, text: str) -> None:
         timestamp = datetime.now().strftime("%H:%M:%S")
         self.log.appendPlainText(f"[{timestamp}] {level}: {text}")
-
-    def closeEvent(self, event) -> None:  # type: ignore[override]
-        if self.steamcmd_service.is_running:
-            self.steamcmd_service.stop()
-        super().closeEvent(event)
 
 
 def run_app() -> None:

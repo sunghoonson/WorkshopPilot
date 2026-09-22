@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from PySide6.QtCore import QObject, QProcess, QTimer, Signal
+from PySide6.QtCore import QObject, QProcess, Signal
 
 
 class SteamCmdService(QObject):
@@ -12,8 +12,6 @@ class SteamCmdService(QObject):
     output_line = Signal(str)
     started = Signal()
     completed = Signal(bool, str, str)
-
-    MAX_SELF_UPDATE_RETRIES = 3
 
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
@@ -29,9 +27,6 @@ class SteamCmdService(QObject):
         self._steamcmd_exe: Path | None = None
         self._app_id = ""
         self._workshop_id = ""
-        self._arguments: list[str] = []
-        self._self_update_retries = 0
-        self._completion_emitted = False
 
     @property
     def is_running(self) -> bool:
@@ -69,26 +64,15 @@ class SteamCmdService(QObject):
         self._steamcmd_exe = steamcmd_exe
         self._app_id = str(app_id)
         self._workshop_id = str(workshop_id)
-        self._arguments = self.build_workshop_arguments(app_id, workshop_id)
-        self._self_update_retries = 0
-        self._completion_emitted = False
-        self._reset_attempt_output()
-
-        self._start_attempt()
-
-    def _start_attempt(self) -> None:
-        if self._steamcmd_exe is None:
-            self._emit_completed_once(False, "SteamCMD 실행 경로가 설정되지 않았습니다.", "")
-            return
-
-        self.process.setWorkingDirectory(str(self._steamcmd_exe.parent))
-        self.process.setProgram(str(self._steamcmd_exe))
-        self.process.setArguments(self._arguments)
-        self.process.start()
-
-    def _reset_attempt_output(self) -> None:
         self._buffer = ""
         self._all_output.clear()
+
+        self.process.setWorkingDirectory(str(steamcmd_exe.parent))
+        self.process.setProgram(str(steamcmd_exe))
+        self.process.setArguments(
+            self.build_workshop_arguments(app_id, workshop_id)
+        )
+        self.process.start()
 
     def stop(self) -> None:
         if not self.is_running:
@@ -101,7 +85,6 @@ class SteamCmdService(QObject):
         raw = bytes(self.process.readAllStandardOutput())
         if not raw:
             return
-
         text = self._decode_output(raw)
         self._buffer += text
 
@@ -112,42 +95,16 @@ class SteamCmdService(QObject):
                 self._all_output.append(line)
                 self.output_line.emit(line)
 
-    def _finished(
-        self,
-        exit_code: int,
-        _exit_status: QProcess.ExitStatus,
-    ) -> None:
+    def _finished(self, exit_code: int, _exit_status: QProcess.ExitStatus) -> None:
         self._read_output()
-
         if self._buffer.strip():
             line = self._buffer.strip("\r\n")
             self._all_output.append(line)
             self.output_line.emit(line)
-
         self._buffer = ""
-        output = "\n".join(self._all_output)
-
-        if self._is_self_update_restart(exit_code, output):
-            if self._self_update_retries < self.MAX_SELF_UPDATE_RETRIES:
-                self._self_update_retries += 1
-                self.output_line.emit(
-                    "[WorkshopPilot] SteamCMD 자체 업데이트 완료. "
-                    f"명령을 자동 재실행합니다 "
-                    f"({self._self_update_retries}/{self.MAX_SELF_UPDATE_RETRIES})."
-                )
-                self._reset_attempt_output()
-                QTimer.singleShot(1500, self._start_attempt)
-                return
-
-            self._emit_completed_once(
-                False,
-                "SteamCMD가 자체 업데이트 후 반복해서 재시작을 요청했습니다.",
-                str(self._content_dir()),
-            )
-            return
 
         source = self._content_dir()
-
+        output = "\n".join(self._all_output)
         has_error = bool(
             re.search(
                 r"(?:ERROR!|Failed to download|Failure|Access Denied|Invalid platform)",
@@ -158,7 +115,6 @@ class SteamCmdService(QObject):
         has_content = source.is_dir() and any(source.iterdir())
 
         success = exit_code == 0 and not has_error and has_content
-
         if success:
             message = f"Workshop {self._workshop_id} 다운로드 완료"
         elif has_error:
@@ -168,30 +124,11 @@ class SteamCmdService(QObject):
         else:
             message = f"SteamCMD 종료 코드: {exit_code}"
 
-        self._emit_completed_once(success, message, str(source))
+        self.completed.emit(success, message, str(source))
 
     def _process_error(self, error: QProcess.ProcessError) -> None:
         if error == QProcess.FailedToStart:
-            self._emit_completed_once(
-                False,
-                "SteamCMD 프로세스를 시작하지 못했습니다.",
-                "",
-            )
-
-    def _emit_completed_once(self, success: bool, message: str, source: str) -> None:
-        if self._completion_emitted:
-            return
-        self._completion_emitted = True
-        self.completed.emit(success, message, source)
-
-    @staticmethod
-    def _is_self_update_restart(exit_code: int, output: str) -> bool:
-        text = output.lower()
-        update_marker = (
-            "update complete, launching" in text
-            or "restarting steamcmd by request" in text
-        )
-        return exit_code == 7 and update_marker
+            self.completed.emit(False, "SteamCMD 프로세스를 시작하지 못했습니다.", "")
 
     def _content_dir(self) -> Path:
         if self._steamcmd_exe is None:

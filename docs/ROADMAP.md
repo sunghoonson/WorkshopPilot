@@ -1,24 +1,33 @@
 # WorkshopPilot Roadmap
 
-## v0.2 - Search foundation
+## v0.1
 - [x] PySide6 GUI skeleton
 - [x] SteamCMD / Mods path settings
 - [x] Game adapter structure
 - [x] RimWorld adapter skeleton
-- [x] Steam game name / App ID search
-- [x] Steam Workshop keyword search
-- [x] Workshop list + preview thumbnails
-- [x] Workshop detail panel
-- [x] Installed folder ID detection
-- [ ] SteamCMD QProcess execution
-- [ ] Download queue
-- [ ] Staging -> Mods installation
+
+## v0.2
+- [x] Steam game/App ID search
+- [x] Steam Workshop search
+- [x] Workshop thumbnails/details
+- [x] Installed mod detection
 
 ## v0.3
-- [ ] Mod dependency detection
-- [ ] Steam Workshop Collection import
-- [ ] Installed mod update checks
-- [ ] Multi-game profiles UI
+- [x] WorkshopPilot-managed SteamCMD install/repair
+- [x] External SteamCMD fallback
+- [x] QProcess SteamCMD execution
+- [x] Live SteamCMD log
+- [x] Workshop item download
+- [x] Staging -> Mods install
+- [x] RimWorld About.xml validation
+- [x] Existing mod replacement rollback
+
+## v0.4 candidates
+- [ ] Download queue / multi-select
+- [ ] Dependency detection and download
+- [ ] Workshop Collection import
+- [ ] Installed mod update comparison
+- [ ] Multi-game profile editor
 - [ ] Retry / failure metadata
-- [ ] RimWorld About.xml details
 - [ ] RimWorld load-order validation
+- [ ] Search pagination / sort / tag UI

@@ -1,13 +1,5 @@
 # Changelog
 
-## v0.3.1 - SteamCMD self-update restart fix
-
-- SteamCMD 최초 bootstrap 과정에서 `Update complete, launching...` 후 종료 코드 7이 발생하는 경우를 정상적인 self-update restart로 처리
-- 관리형 SteamCMD 초기화 시 최대 4회 자동 재실행
-- Workshop 다운로드 중 SteamCMD가 자체 업데이트되더라도 QProcess가 최대 3회 자동 재시도
-- 관리형 SteamCMD가 실제 초기화에 성공한 경우에만 `.workshoppilot_ready` 마커를 생성
-- 중간 초기화 실패 후 `steamcmd.exe`만 존재하는 상태를 `준비됨 (관리형)`으로 잘못 표시하지 않도록 수정
-
 ## v0.3 - Managed SteamCMD + Workshop install
 
 - WorkshopPilot 관리형 SteamCMD 런타임 추가
