@@ -11,7 +11,6 @@ class DownloadTask:
     mods_root: str
     auth_mode: str = "auto"
     username: str = ""
-    remote_time_updated: int = 0
     status: str = "queued"
     message: str = ""
     attempts: int = 0

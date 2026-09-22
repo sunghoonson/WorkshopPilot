@@ -108,32 +108,6 @@ About/About.xml
 Workshop ID가 확인되는 모드는 선택 재설치/업데이트 및 전체 업데이트가 가능합니다.
 로컬 모드는 삭제할 수 있지만 Workshop ID가 없으면 SteamCMD 업데이트 대상에는 포함되지 않습니다.
 
-
-## v0.7 Workshop 업데이트 확인
-
-WorkshopPilot이 모드를 성공적으로 설치하면 당시 Steam Workshop의 `time_updated`를 별도 상태 DB에 기록합니다.
-
-```text
-%LOCALAPPDATA%\WorkshopPilot\state\installations.json
-```
-
-게임의 실제 Mods 폴더에는 WorkshopPilot 전용 메타데이터 파일을 추가하지 않습니다.
-
-`설치된 모드 관리 -> 업데이트 확인`을 실행하면 현재 Workshop 시각과 설치 당시 기준을 비교해:
-
-```text
-최신
-업데이트 있음
-기준 없음
-확인 불가
-로컬
-```
-
-으로 표시합니다.
-
-`기준 없음`은 v0.7 이전에 설치된 모드처럼 WorkshopPilot이 정확한 설치 기준 시각을 기록하지 못한 항목입니다.
-이 항목은 한 번 `재설치 / 업데이트`하면 이후부터 정확한 업데이트 비교가 가능합니다.
-
 ## 빠른 시작
 
 1. `SETUP_VENV.bat`

@@ -33,7 +33,6 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from app.core.install_metadata_service import InstallMetadataService
 from app.core.installed_mod_service import InstalledModService
 from app.core.installer import install_mod_folder
 from app.core.settings import load_settings, save_settings
@@ -89,10 +88,7 @@ class MainWindow(QMainWindow):
         self.settings = load_settings()
         self.app_service = SteamAppService()
         self.workshop_service = WorkshopService()
-        self.install_metadata_service = InstallMetadataService()
-        self.installed_mod_service = InstalledModService(
-            metadata=self.install_metadata_service
-        )
+        self.installed_mod_service = InstalledModService()
         self.steamcmd_manager = SteamCmdManager()
         self.steamcmd_service = SteamCmdService(self)
         self.thread_pool = QThreadPool.globalInstance()
@@ -308,16 +304,6 @@ class MainWindow(QMainWindow):
         self.installed_refresh_btn = QPushButton("새로고침")
         self.installed_refresh_btn.clicked.connect(self._scan_installed_mods)
 
-        self.installed_check_updates_btn = QPushButton("업데이트 확인")
-        self.installed_check_updates_btn.clicked.connect(
-            self._check_installed_mod_updates
-        )
-        self.installed_update_available_btn = QPushButton("업데이트 있는 모드만 설치")
-        self.installed_update_available_btn.setEnabled(False)
-        self.installed_update_available_btn.clicked.connect(
-            self._update_available_installed_mods
-        )
-
         self.installed_open_folder_btn = QPushButton("폴더 열기")
         self.installed_open_folder_btn.clicked.connect(self._open_installed_mod_folder)
         self.installed_open_workshop_btn = QPushButton("Workshop 열기")
@@ -338,8 +324,6 @@ class MainWindow(QMainWindow):
         installed_toolbar.addWidget(self.installed_count_label)
         installed_toolbar.addStretch(1)
         installed_toolbar.addWidget(self.installed_refresh_btn)
-        installed_toolbar.addWidget(self.installed_check_updates_btn)
-        installed_toolbar.addWidget(self.installed_update_available_btn)
         installed_toolbar.addWidget(self.installed_open_folder_btn)
         installed_toolbar.addWidget(self.installed_open_workshop_btn)
         installed_toolbar.addWidget(self.installed_reinstall_btn)
@@ -351,7 +335,6 @@ class MainWindow(QMainWindow):
         self.installed_tree.setHeaderLabels(
             [
                 "상태",
-                "업데이트",
                 "모드 이름",
                 "Workshop ID",
                 "Package ID",
@@ -365,12 +348,11 @@ class MainWindow(QMainWindow):
         self.installed_tree.itemSelectionChanged.connect(
             self._on_installed_selection_changed
         )
-        self.installed_tree.setColumnWidth(0, 100)
-        self.installed_tree.setColumnWidth(1, 120)
-        self.installed_tree.setColumnWidth(2, 280)
-        self.installed_tree.setColumnWidth(3, 130)
-        self.installed_tree.setColumnWidth(4, 230)
-        self.installed_tree.setColumnWidth(5, 150)
+        self.installed_tree.setColumnWidth(0, 90)
+        self.installed_tree.setColumnWidth(1, 280)
+        self.installed_tree.setColumnWidth(2, 130)
+        self.installed_tree.setColumnWidth(3, 230)
+        self.installed_tree.setColumnWidth(4, 150)
         installed_layout.addWidget(self.installed_tree, 1)
 
         self.installed_detail = QPlainTextEdit()
@@ -782,11 +764,7 @@ class MainWindow(QMainWindow):
             "auth_mode": auth_mode,
             "username": username,
             "items": [
-                (
-                    item.published_file_id,
-                    item.title,
-                    item.time_updated,
-                )
+                (item.published_file_id, item.title)
                 for item in valid_items
             ],
         }
@@ -819,18 +797,9 @@ class MainWindow(QMainWindow):
         added = 0
         reset = 0
         for raw in items:
-            if len(raw) >= 3:
-                workshop_id, title, remote_time_updated = raw[:3]
-            else:
-                workshop_id, title = raw[:2]
-                remote_time_updated = 0
-
+            workshop_id, title = raw
             workshop_id = str(workshop_id)
             title = str(title)
-            try:
-                remote_time_updated = int(remote_time_updated or 0)
-            except (TypeError, ValueError):
-                remote_time_updated = 0
 
             task = self.download_tasks.get(workshop_id)
             if task is None:
@@ -841,7 +810,6 @@ class MainWindow(QMainWindow):
                     mods_root=mods_root,
                     auth_mode=auth_mode,
                     username=username,
-                    remote_time_updated=remote_time_updated,
                 )
                 self.download_tasks[workshop_id] = task
                 self.download_queue_order.append(workshop_id)
@@ -859,7 +827,6 @@ class MainWindow(QMainWindow):
                 task.mods_root = mods_root
                 task.auth_mode = auth_mode
                 task.username = username
-                task.remote_time_updated = remote_time_updated
                 task.status = "queued"
                 task.message = ""
                 reset += 1
@@ -1184,43 +1151,23 @@ class MainWindow(QMainWindow):
     @Slot(object)
     def _on_installed_scan_success(self, payload: object) -> None:
         mods = list(payload) if isinstance(payload, list) else []
-        self.installed_mods.clear()
-
-        for mod in mods:
-            if isinstance(mod, InstalledMod):
-                self.installed_mods[str(mod.path)] = mod
-
-        self.installed_refresh_btn.setEnabled(True)
-        self._render_installed_mods()
-        self._log(
-            "INFO",
-            f"설치된 모드 스캔 완료: {len(self.installed_mods)}개",
-        )
-
-    def _render_installed_mods(self) -> None:
         self.installed_tree.clear()
+        self.installed_mods.clear()
 
         workshop_count = 0
         invalid_count = 0
-        update_count = 0
-        baseline_missing = 0
 
-        for mod in sorted(
-            self.installed_mods.values(),
-            key=lambda value: (
-                not bool(value.workshop_id),
-                value.name.lower(),
-                value.folder_name.lower(),
-            ),
-        ):
+        for mod in mods:
+            if not isinstance(mod, InstalledMod):
+                continue
+
+            key = str(mod.path)
+            self.installed_mods[key] = mod
+
             if mod.workshop_id:
                 workshop_count += 1
             if not mod.valid:
                 invalid_count += 1
-            if mod.needs_update:
-                update_count += 1
-            if mod.update_status == "baseline_missing":
-                baseline_missing += 1
 
             status = "정상" if mod.valid else "경고"
             if mod.workshop_id:
@@ -1229,7 +1176,6 @@ class MainWindow(QMainWindow):
             row = QTreeWidgetItem(
                 [
                     status,
-                    mod.update_status_text,
                     mod.name,
                     mod.workshop_id or "-",
                     mod.package_id or "-",
@@ -1237,33 +1183,23 @@ class MainWindow(QMainWindow):
                     mod.folder_name,
                 ]
             )
-            row.setData(0, Qt.UserRole, str(mod.path))
+            row.setData(0, Qt.UserRole, key)
             if not mod.valid:
                 row.setToolTip(0, mod.message)
-                row.setToolTip(2, mod.message)
-
-            if mod.update_status == "update_available":
-                row.setToolTip(
-                    1,
-                    "Steam Workshop에 설치 기준보다 새로운 업데이트가 있습니다.",
-                )
-            elif mod.update_status == "baseline_missing":
-                row.setToolTip(
-                    1,
-                    "이 모드는 v0.7 이전에 설치되어 정확한 설치 기준 시각이 없습니다. "
-                    "한 번 재설치/업데이트하면 이후부터 정확히 비교할 수 있습니다.",
-                )
-
+                row.setToolTip(1, mod.message)
             self.installed_tree.addTopLevelItem(row)
 
+        self.installed_refresh_btn.setEnabled(True)
         self.installed_count_label.setText(
             f"설치된 모드: {len(self.installed_mods)}개 / "
-            f"Workshop {workshop_count}개 / "
-            f"업데이트 {update_count}개 / "
-            f"기준 없음 {baseline_missing}개 / "
-            f"경고 {invalid_count}개"
+            f"Workshop {workshop_count}개 / 경고 {invalid_count}개"
         )
         self._update_installed_action_buttons()
+        self._log(
+            "INFO",
+            f"설치된 모드 스캔 완료: {len(self.installed_mods)}개 "
+            f"(Workshop {workshop_count} / 경고 {invalid_count})",
+        )
 
     @Slot(str)
     def _on_installed_scan_error(self, message: str) -> None:
@@ -1302,9 +1238,6 @@ class MainWindow(QMainWindow):
             f"Package ID: {mod.package_id or '-'}",
             f"저작자: {mod.author or '-'}",
             f"지원 버전: {mod.versions_text}",
-            f"업데이트 상태: {mod.update_status_text}",
-            f"설치 기준 Workshop 시각: {self._format_unix_time(mod.installed_remote_time_updated)}",
-            f"현재 Workshop 시각: {self._format_unix_time(mod.remote_time_updated)}",
             f"로컬 검증: {'정상' if mod.valid else '경고'}",
             f"메시지: {mod.message or '-'}",
         ]
@@ -1332,117 +1265,6 @@ class MainWindow(QMainWindow):
         self.installed_update_all_btn.setEnabled(
             any_workshop and not self._queue_running
         )
-        self.installed_check_updates_btn.setEnabled(
-            any_workshop and not self._queue_running
-        )
-        self.installed_update_available_btn.setEnabled(
-            (not self._queue_running)
-            and any(mod.needs_update for mod in self.installed_mods.values())
-        )
-
-    def _check_installed_mod_updates(self) -> None:
-        workshop_ids = [
-            mod.workshop_id
-            for mod in self.installed_mods.values()
-            if mod.workshop_id
-        ]
-        if not workshop_ids:
-            return
-
-        self.installed_check_updates_btn.setEnabled(False)
-        self.installed_count_label.setText(
-            f"설치된 모드: Workshop 업데이트 확인 중... ({len(workshop_ids)}개)"
-        )
-        self._log(
-            "INFO",
-            f"설치된 Workshop 모드 업데이트 확인 시작: {len(workshop_ids)}개",
-        )
-
-        worker = FunctionWorker(
-            fn=lambda: self.workshop_service.get_details(workshop_ids)
-        )
-        worker.signals.succeeded.connect(self._on_update_check_success)
-        worker.signals.failed.connect(self._on_update_check_error)
-        self._start_worker(worker)
-
-    @Slot(object)
-    def _on_update_check_success(self, payload: object) -> None:
-        details = list(payload) if isinstance(payload, list) else []
-        by_id = {
-            item.published_file_id: item
-            for item in details
-            if isinstance(item, WorkshopItem)
-        }
-
-        update_count = 0
-        unavailable_count = 0
-        baseline_missing = 0
-
-        for mod in self.installed_mods.values():
-            if not mod.workshop_id:
-                mod.update_status = "local"
-                continue
-
-            remote = by_id.get(mod.workshop_id)
-            if remote is None:
-                mod.remote_time_updated = 0
-                mod.update_status = "unavailable"
-                unavailable_count += 1
-                continue
-
-            mod.remote_time_updated = int(remote.time_updated or 0)
-
-            if mod.installed_remote_time_updated <= 0:
-                mod.update_status = "baseline_missing"
-                baseline_missing += 1
-            elif (
-                mod.remote_time_updated > mod.installed_remote_time_updated
-            ):
-                mod.update_status = "update_available"
-                update_count += 1
-            else:
-                mod.update_status = "latest"
-
-        self.installed_check_updates_btn.setEnabled(True)
-        self._render_installed_mods()
-        self._log(
-            "INFO",
-            f"업데이트 확인 완료: 업데이트 {update_count} / "
-            f"기준 없음 {baseline_missing} / 확인 불가 {unavailable_count}",
-        )
-
-    @Slot(str)
-    def _on_update_check_error(self, message: str) -> None:
-        self.installed_check_updates_btn.setEnabled(True)
-        self._render_installed_mods()
-        self._log("ERROR", f"설치된 모드 업데이트 확인 실패: {message}")
-        QMessageBox.warning(self, "업데이트 확인 실패", message)
-
-    def _update_available_installed_mods(self) -> None:
-        mods = [
-            mod
-            for mod in self.installed_mods.values()
-            if mod.workshop_id and mod.needs_update
-        ]
-        if not mods:
-            QMessageBox.information(
-                self,
-                "업데이트",
-                "현재 '업데이트 있음'으로 확인된 모드가 없습니다.",
-            )
-            return
-
-        self._enqueue_installed_mod_updates(mods)
-
-    @staticmethod
-    def _format_unix_time(value: int) -> str:
-        try:
-            value = int(value or 0)
-        except (TypeError, ValueError):
-            value = 0
-        if value <= 0:
-            return "-"
-        return datetime.fromtimestamp(value).strftime("%Y-%m-%d %H:%M:%S")
 
     def _open_installed_mod_folder(self) -> None:
         selected = self._selected_installed_mods()
@@ -1514,11 +1336,7 @@ class MainWindow(QMainWindow):
             "auth_mode": self._current_auth_mode(),
             "username": self.steam_username_edit.text().strip(),
             "items": [
-                (
-                    mod.workshop_id,
-                    mod.name,
-                    mod.remote_time_updated,
-                )
+                (mod.workshop_id, mod.name)
                 for mod in mods
                 if mod.workshop_id
             ],
@@ -1568,20 +1386,13 @@ class MainWindow(QMainWindow):
             return
 
         mods_root = Path(self.mods_edit.text().strip())
-        app_id = self._resolved_app_id()
-        selected_copy = list(selected)
+        paths = [mod.path for mod in selected]
 
         def delete_many() -> list[str]:
             deleted: list[str] = []
-            for mod in selected_copy:
-                self.installed_mod_service.delete(mods_root, mod.path)
-                if mod.workshop_id:
-                    self.install_metadata_service.remove(
-                        app_id,
-                        mods_root,
-                        mod.workshop_id,
-                    )
-                deleted.append(str(mod.path))
+            for path in paths:
+                self.installed_mod_service.delete(mods_root, path)
+                deleted.append(str(path))
             return deleted
 
         self.installed_delete_btn.setEnabled(False)
@@ -1769,10 +1580,10 @@ class MainWindow(QMainWindow):
         validator = adapter.validate_mod_folder if adapter is not None else None
 
         worker = FunctionWorker(
-            fn=lambda: self._install_task_and_record_metadata(
-                task=task,
+            fn=lambda: install_mod_folder(
                 source=source,
                 mods_root=mods_root,
+                destination_name=task.workshop_id,
                 validator=validator,
             )
         )
@@ -1781,40 +1592,6 @@ class MainWindow(QMainWindow):
         self._start_worker(worker)
 
     @Slot(object)
-    def _install_task_and_record_metadata(
-        self,
-        task: DownloadTask,
-        source: Path,
-        mods_root: Path,
-        validator: object,
-    ) -> Path:
-        destination = install_mod_folder(
-            source=source,
-            mods_root=mods_root,
-            destination_name=task.workshop_id,
-            validator=validator,
-        )
-
-        remote_time_updated = int(task.remote_time_updated or 0)
-        if remote_time_updated <= 0:
-            try:
-                details = self.workshop_service.get_details([task.workshop_id])
-                if details:
-                    remote_time_updated = int(details[0].time_updated or 0)
-            except Exception:
-                # The install itself succeeded. Update tracking can be refreshed later.
-                remote_time_updated = 0
-
-        self.install_metadata_service.record_install(
-            task.app_id,
-            mods_root,
-            task.workshop_id,
-            title=task.title,
-            remote_time_updated=remote_time_updated,
-            destination=destination,
-        )
-        return destination
-
     @Slot(object)
     def _on_mod_install_success(self, payload: object) -> None:
         workshop_id = self._active_download_id

@@ -4,15 +4,11 @@ import shutil
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-from app.core.install_metadata_service import InstallMetadataService
 from app.models.installed_mod import InstalledMod
 
 
 class InstalledModService:
-    """Scan and safely manage mods already present in a game\'s Mods directory."""
-
-    def __init__(self, metadata: InstallMetadataService | None = None) -> None:
-        self.metadata = metadata or InstallMetadataService()
+    """Scan and safely manage mods already present in a game's Mods directory."""
 
     _INTERNAL_PREFIXES = (
         ".workshoppilot_tmp_",
@@ -35,9 +31,9 @@ class InstalledModService:
                 continue
 
             if str(app_id) == "294100":
-                item = self._scan_rimworld(child, mods_root, str(app_id))
+                item = self._scan_rimworld(child)
             else:
-                item = self._scan_generic(child, mods_root, str(app_id))
+                item = self._scan_generic(child)
             result.append(item)
 
         result.sort(
@@ -66,39 +62,17 @@ class InstalledModService:
 
         shutil.rmtree(mod_path)
 
-    def _scan_generic(
-        self,
-        mod_dir: Path,
-        mods_root: Path,
-        app_id: str,
-    ) -> InstalledMod:
+    def _scan_generic(self, mod_dir: Path) -> InstalledMod:
         workshop_id = mod_dir.name if mod_dir.name.isdigit() else ""
-        record = self.metadata.get(app_id, mods_root, workshop_id) if workshop_id else {}
-        baseline = self._to_int(record.get("remote_time_updated"))
         return InstalledMod(
             folder_name=mod_dir.name,
             path=mod_dir,
             name=mod_dir.name,
             workshop_id=workshop_id,
-            installed_remote_time_updated=baseline,
-            update_status=("check_required" if baseline else "baseline_missing")
-            if workshop_id else "local",
         )
 
-    def _scan_rimworld(
-        self,
-        mod_dir: Path,
-        mods_root: Path,
-        app_id: str,
-    ) -> InstalledMod:
+    def _scan_rimworld(self, mod_dir: Path) -> InstalledMod:
         workshop_id = mod_dir.name if mod_dir.name.isdigit() else ""
-        record = self.metadata.get(app_id, mods_root, workshop_id) if workshop_id else {}
-        baseline = self._to_int(record.get("remote_time_updated"))
-        update_status = (
-            "check_required" if workshop_id and baseline
-            else "baseline_missing" if workshop_id
-            else "local"
-        )
         about_xml = mod_dir / "About" / "About.xml"
 
         if not about_xml.is_file():
@@ -109,8 +83,6 @@ class InstalledModService:
                 workshop_id=workshop_id,
                 valid=False,
                 message="About/About.xml 없음",
-                installed_remote_time_updated=baseline,
-                update_status=update_status,
             )
 
         try:
@@ -123,8 +95,6 @@ class InstalledModService:
                 workshop_id=workshop_id,
                 valid=False,
                 message=f"About.xml 파싱 실패: {exc}",
-                installed_remote_time_updated=baseline,
-                update_status=update_status,
             )
 
         name = (root.findtext("name") or mod_dir.name).strip()
@@ -157,14 +127,4 @@ class InstalledModService:
             supported_versions=tuple(versions),
             valid=True,
             message="정상",
-            installed_remote_time_updated=baseline,
-            update_status=update_status,
         )
-
-
-    @staticmethod
-    def _to_int(value: object) -> int:
-        try:
-            return int(value or 0)
-        except (TypeError, ValueError):
-            return 0

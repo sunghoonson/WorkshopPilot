@@ -1,19 +1,5 @@
 # Changelog
 
-## v0.7 - Workshop update tracking
-
-- 설치 성공 시 Workshop `time_updated`를 `%LOCALAPPDATA%\WorkshopPilot\state\installations.json`에 기록
-- 게임/모드 폴더 내부를 수정하지 않고 WorkshopPilot 상태 DB로 설치 기준 관리
-- 설치된 모드 관리 탭에 `업데이트` 열 추가
-- `업데이트 확인`으로 현재 Steam Workshop `time_updated` 일괄 조회
-- 설치 당시 기준보다 Workshop 시각이 새로우면 `업데이트 있음`
-- `업데이트 있는 모드만 설치` 기능 추가
-- v0.7 이전 설치는 정확한 기준이 없으므로 `기준 없음`으로 표시
-- v0.7 이전 모드는 한 번 재설치/업데이트하면 이후부터 정확한 비교 가능
-- 선택/전체 업데이트 시 확인된 원격 시각을 다운로드 큐에 전달
-- 원격 시각을 모르는 상태에서 설치해도 성공 후 상세 API를 조회하여 기준 기록 시도
-- 모드 삭제 시 해당 WorkshopPilot 설치 메타데이터도 제거
-
 ## v0.6 - Installed mods manager
 
 - 메인 영역을 `Workshop 탐색` / `설치된 모드 관리` 탭으로 분리
