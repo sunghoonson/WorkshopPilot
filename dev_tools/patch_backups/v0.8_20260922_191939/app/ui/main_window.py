@@ -36,7 +36,6 @@ from PySide6.QtWidgets import (
 from app.core.install_metadata_service import InstallMetadataService
 from app.core.installed_mod_service import InstalledModService
 from app.core.installer import install_mod_folder
-from app.core.rimworld_diagnostic_service import RimWorldDiagnosticService
 from app.core.settings import load_settings, save_settings
 from app.core.steam_app_service import SteamAppService
 from app.core.steamcmd_manager import SteamCmdManager
@@ -46,7 +45,6 @@ from app.games.registry import get_game_adapter
 from app.models.download_task import DownloadTask
 from app.models.installed_mod import InstalledMod
 from app.models.game import GameSearchResult
-from app.models.rimworld_diagnostic import RimWorldDiagnosticReport, RimWorldIssue
 from app.models.workshop_item import WorkshopItem
 
 
@@ -95,7 +93,6 @@ class MainWindow(QMainWindow):
         self.installed_mod_service = InstalledModService(
             metadata=self.install_metadata_service
         )
-        self.rimworld_diagnostic_service = RimWorldDiagnosticService()
         self.steamcmd_manager = SteamCmdManager()
         self.steamcmd_service = SteamCmdService(self)
         self.thread_pool = QThreadPool.globalInstance()
@@ -104,7 +101,6 @@ class MainWindow(QMainWindow):
         self.current_game_name = ""
         self.workshop_items: dict[str, WorkshopItem] = {}
         self.installed_mods: dict[str, InstalledMod] = {}
-        self.rimworld_diagnostic_report: RimWorldDiagnosticReport | None = None
         self.pixmap_cache: dict[str, QPixmap] = {}
         self._thumbnail_generation = 0
         self._active_workers: set[FunctionWorker] = set()
@@ -386,82 +382,6 @@ class MainWindow(QMainWindow):
         installed_layout.addWidget(self.installed_detail)
 
         self.main_tabs.addTab(installed_tab, "설치된 모드 관리")
-
-        # -------------------------------------------------------------
-        # RimWorld 진단 탭
-        # -------------------------------------------------------------
-        diagnostic_tab = QWidget()
-        diagnostic_layout = QVBoxLayout(diagnostic_tab)
-
-        diagnostic_toolbar = QHBoxLayout()
-        self.diagnostic_summary_label = QLabel("진단 전")
-        self.diagnostic_run_btn = QPushButton("진단 실행")
-        self.diagnostic_run_btn.clicked.connect(self._run_rimworld_diagnostics)
-        self.diagnostic_open_config_btn = QPushButton("ModsConfig 열기")
-        self.diagnostic_open_config_btn.clicked.connect(
-            self._open_rimworld_mods_config
-        )
-        self.diagnostic_download_missing_btn = QPushButton("누락 의존성 다운로드")
-        self.diagnostic_download_missing_btn.setEnabled(False)
-        self.diagnostic_download_missing_btn.clicked.connect(
-            self._download_missing_rimworld_dependencies
-        )
-
-        diagnostic_toolbar.addWidget(self.diagnostic_summary_label)
-        diagnostic_toolbar.addStretch(1)
-        diagnostic_toolbar.addWidget(self.diagnostic_run_btn)
-        diagnostic_toolbar.addWidget(self.diagnostic_open_config_btn)
-        diagnostic_toolbar.addWidget(self.diagnostic_download_missing_btn)
-        diagnostic_layout.addLayout(diagnostic_toolbar)
-
-        diagnostic_splitter = QSplitter(Qt.Horizontal)
-
-        active_panel = QWidget()
-        active_layout = QVBoxLayout(active_panel)
-        active_layout.addWidget(QLabel("현재 활성 로드 순서"))
-        self.diagnostic_active_tree = QTreeWidget()
-        self.diagnostic_active_tree.setHeaderLabels(
-            ["순서", "상태", "모드", "Package ID"]
-        )
-        self.diagnostic_active_tree.setRootIsDecorated(False)
-        self.diagnostic_active_tree.setAlternatingRowColors(True)
-        self.diagnostic_active_tree.setColumnWidth(0, 65)
-        self.diagnostic_active_tree.setColumnWidth(1, 95)
-        self.diagnostic_active_tree.setColumnWidth(2, 260)
-        active_layout.addWidget(self.diagnostic_active_tree)
-        diagnostic_splitter.addWidget(active_panel)
-
-        issue_panel = QWidget()
-        issue_layout = QVBoxLayout(issue_panel)
-        issue_layout.addWidget(QLabel("진단 결과"))
-        self.diagnostic_issue_tree = QTreeWidget()
-        self.diagnostic_issue_tree.setHeaderLabels(
-            ["심각도", "유형", "모드", "관련 모드", "내용"]
-        )
-        self.diagnostic_issue_tree.setRootIsDecorated(False)
-        self.diagnostic_issue_tree.setAlternatingRowColors(True)
-        self.diagnostic_issue_tree.itemSelectionChanged.connect(
-            self._on_diagnostic_issue_selected
-        )
-        self.diagnostic_issue_tree.setColumnWidth(0, 75)
-        self.diagnostic_issue_tree.setColumnWidth(1, 130)
-        self.diagnostic_issue_tree.setColumnWidth(2, 220)
-        self.diagnostic_issue_tree.setColumnWidth(3, 220)
-        issue_layout.addWidget(self.diagnostic_issue_tree)
-        diagnostic_splitter.addWidget(issue_panel)
-
-        diagnostic_splitter.setSizes([540, 760])
-        diagnostic_layout.addWidget(diagnostic_splitter, 1)
-
-        self.diagnostic_detail = QPlainTextEdit()
-        self.diagnostic_detail.setReadOnly(True)
-        self.diagnostic_detail.setMaximumHeight(130)
-        self.diagnostic_detail.setPlaceholderText(
-            "진단 항목을 선택하면 상세 내용이 표시됩니다."
-        )
-        diagnostic_layout.addWidget(self.diagnostic_detail)
-
-        self.main_tabs.addTab(diagnostic_tab, "RimWorld 진단")
 
         # 공통 로그 / 설정
         layout.addWidget(QLabel("로그"))
@@ -1234,26 +1154,11 @@ class MainWindow(QMainWindow):
         )
         if hasattr(self, "installed_tree"):
             self._update_installed_action_buttons()
-        if hasattr(self, "diagnostic_download_missing_btn"):
-            report = self.rimworld_diagnostic_report
-            has_downloadable = bool(
-                report
-                and any(
-                    issue.code == "missing_dependency" and issue.workshop_id
-                    for issue in report.issues
-                )
-            )
-            self.diagnostic_download_missing_btn.setEnabled(
-                (not running) and has_downloadable
-            )
 
     @Slot(int)
     def _on_main_tab_changed(self, index: int) -> None:
-        tab_name = self.main_tabs.tabText(index)
-        if tab_name == "설치된 모드 관리":
+        if self.main_tabs.tabText(index) == "설치된 모드 관리":
             self._scan_installed_mods()
-        elif tab_name == "RimWorld 진단":
-            self._run_rimworld_diagnostics()
 
     def _scan_installed_mods(self) -> None:
         mods_text = self.mods_edit.text().strip()
@@ -1400,10 +1305,6 @@ class MainWindow(QMainWindow):
             f"업데이트 상태: {mod.update_status_text}",
             f"설치 기준 Workshop 시각: {self._format_unix_time(mod.installed_remote_time_updated)}",
             f"현재 Workshop 시각: {self._format_unix_time(mod.remote_time_updated)}",
-            f"필수 의존성: {', '.join(dep.display_name or dep.package_id for dep in mod.dependencies) or '-'}",
-            f"Load After: {', '.join(mod.load_after) or '-'}",
-            f"Load Before: {', '.join(mod.load_before) or '-'}",
-            f"비호환: {', '.join(mod.incompatible_with) or '-'}",
             f"로컬 검증: {'정상' if mod.valid else '경고'}",
             f"메시지: {mod.message or '-'}",
         ]
@@ -1707,245 +1608,6 @@ class MainWindow(QMainWindow):
         QMessageBox.warning(self, "모드 삭제 실패", message)
         self._scan_installed_mods()
 
-    def _run_rimworld_diagnostics(self) -> None:
-        app_id = self._resolved_app_id()
-        if app_id != "294100":
-            self.rimworld_diagnostic_report = None
-            self.diagnostic_active_tree.clear()
-            self.diagnostic_issue_tree.clear()
-            self.diagnostic_detail.setPlainText(
-                "현재 v0.8 진단 기능은 RimWorld(App ID 294100)에만 적용됩니다."
-            )
-            self.diagnostic_summary_label.setText("RimWorld 전용 기능")
-            self.diagnostic_download_missing_btn.setEnabled(False)
-            return
-
-        mods_text = self.mods_edit.text().strip()
-        if not mods_text:
-            self.diagnostic_summary_label.setText("Mods 경로 없음")
-            return
-
-        self.diagnostic_run_btn.setEnabled(False)
-        self.diagnostic_summary_label.setText("진단 중...")
-        self._log("INFO", "RimWorld 의존성 / 로드 순서 진단 시작")
-
-        mods_root = Path(mods_text)
-
-        def diagnose() -> RimWorldDiagnosticReport:
-            installed = self.installed_mod_service.scan(mods_root, app_id)
-            return self.rimworld_diagnostic_service.analyze(installed)
-
-        worker = FunctionWorker(fn=diagnose)
-        worker.signals.succeeded.connect(self._on_rimworld_diagnostic_success)
-        worker.signals.failed.connect(self._on_rimworld_diagnostic_error)
-        self._start_worker(worker)
-
-    @Slot(object)
-    def _on_rimworld_diagnostic_success(self, payload: object) -> None:
-        self.diagnostic_run_btn.setEnabled(True)
-
-        if not isinstance(payload, RimWorldDiagnosticReport):
-            self._on_rimworld_diagnostic_error("진단 결과 형식이 올바르지 않습니다.")
-            return
-
-        self.rimworld_diagnostic_report = payload
-        self.diagnostic_active_tree.clear()
-        self.diagnostic_issue_tree.clear()
-
-        for active in payload.active_mods:
-            row = QTreeWidgetItem(
-                [
-                    str(active.index),
-                    active.status_text,
-                    active.name,
-                    active.package_id,
-                ]
-            )
-            row.setData(0, Qt.UserRole, active.package_id)
-            self.diagnostic_active_tree.addTopLevelItem(row)
-
-        for issue in payload.issues:
-            row = QTreeWidgetItem(
-                [
-                    issue.severity_text,
-                    issue.type_text,
-                    issue.mod_name or issue.mod_package_id,
-                    issue.related_name or issue.related_package_id or "-",
-                    issue.message,
-                ]
-            )
-            row.setData(0, Qt.UserRole, issue)
-            if issue.workshop_id:
-                row.setToolTip(
-                    3,
-                    f"Workshop ID: {issue.workshop_id}"
-                )
-            self.diagnostic_issue_tree.addTopLevelItem(row)
-
-        missing_downloadable = sum(
-            1
-            for issue in payload.issues
-            if issue.code == "missing_dependency" and issue.workshop_id
-        )
-        self.diagnostic_download_missing_btn.setEnabled(
-            missing_downloadable > 0 and not self._queue_running
-        )
-
-        self.diagnostic_summary_label.setText(
-            f"오류 {payload.error_count} / "
-            f"경고 {payload.warning_count} / "
-            f"정보 {payload.info_count} / "
-            f"활성 모드 {len(payload.active_mods)}"
-        )
-
-        self.diagnostic_open_config_btn.setEnabled(
-            payload.mods_config_path.is_file()
-        )
-
-        self.diagnostic_detail.setPlainText(
-            f"ModsConfig: {payload.mods_config_path}\n"
-            f"자동 다운로드 가능한 누락 의존성: {missing_downloadable}개"
-        )
-
-        self._log(
-            "INFO",
-            f"RimWorld 진단 완료: 오류 {payload.error_count} / "
-            f"경고 {payload.warning_count} / "
-            f"활성 {len(payload.active_mods)}",
-        )
-
-    @Slot(str)
-    def _on_rimworld_diagnostic_error(self, message: str) -> None:
-        self.diagnostic_run_btn.setEnabled(True)
-        self.diagnostic_summary_label.setText("진단 실패")
-        self.diagnostic_download_missing_btn.setEnabled(False)
-        self._log("ERROR", f"RimWorld 진단 실패: {message}")
-        QMessageBox.warning(self, "RimWorld 진단 실패", message)
-
-    def _on_diagnostic_issue_selected(self) -> None:
-        rows = self.diagnostic_issue_tree.selectedItems()
-        if len(rows) != 1:
-            if not rows:
-                self.diagnostic_detail.clear()
-            return
-
-        issue = rows[0].data(0, Qt.UserRole)
-        if not isinstance(issue, RimWorldIssue):
-            return
-
-        lines = [
-            f"심각도: {issue.severity_text}",
-            f"유형: {issue.type_text}",
-            f"모드: {issue.mod_name or issue.mod_package_id}",
-            f"Package ID: {issue.mod_package_id or '-'}",
-            f"관련 모드: {issue.related_name or issue.related_package_id or '-'}",
-            f"관련 Package ID: {issue.related_package_id or '-'}",
-            f"Workshop ID: {issue.workshop_id or '-'}",
-            "",
-            issue.message,
-        ]
-        self.diagnostic_detail.setPlainText("\n".join(lines))
-
-    def _open_rimworld_mods_config(self) -> None:
-        report = self.rimworld_diagnostic_report
-        path = (
-            report.mods_config_path
-            if report is not None
-            else self.rimworld_diagnostic_service.default_mods_config_path()
-        )
-
-        if not path.is_file():
-            QMessageBox.information(
-                self,
-                "ModsConfig",
-                f"ModsConfig.xml을 찾지 못했습니다.\n\n{path}",
-            )
-            return
-
-        QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
-
-    def _download_missing_rimworld_dependencies(self) -> None:
-        report = self.rimworld_diagnostic_report
-        if report is None:
-            return
-
-        downloadable: dict[str, tuple[str, str, int]] = {}
-        for issue in report.issues:
-            if issue.code != "missing_dependency" or not issue.workshop_id:
-                continue
-
-            title = (
-                issue.related_name
-                or issue.related_package_id
-                or f"Workshop {issue.workshop_id}"
-            )
-            downloadable[issue.workshop_id] = (
-                issue.workshop_id,
-                title,
-                0,
-            )
-
-        if not downloadable:
-            QMessageBox.information(
-                self,
-                "누락 의존성",
-                "Workshop ID가 확인되는 누락 의존성이 없습니다.",
-            )
-            return
-
-        answer = QMessageBox.question(
-            self,
-            "누락 의존성 다운로드",
-            f"{len(downloadable)}개 누락 의존성을 다운로드 큐에 추가할까요?",
-        )
-        if answer != QMessageBox.Yes:
-            return
-
-        app_id = self._resolved_app_id()
-        mods_root = self.mods_edit.text().strip()
-        if not app_id or not mods_root:
-            return
-
-        username = self.steam_username_edit.text().strip()
-        auth_mode = self._current_auth_mode()
-        if auth_mode == "account" and not username:
-            username, ok = QInputDialog.getText(
-                self,
-                "Steam 계정",
-                "Steam 계정명을 입력해 주세요.",
-            )
-            username = username.strip()
-            if not ok or not username:
-                return
-            self.steam_username_edit.setText(username)
-
-        context: dict[str, object] = {
-            "app_id": app_id,
-            "mods_root": mods_root,
-            "auth_mode": auth_mode,
-            "username": username,
-            "items": list(downloadable.values()),
-        }
-
-        resolved = self.steamcmd_manager.resolve(
-            str(self.settings.get("steamcmd_path", "") or "")
-        )
-        if resolved is None:
-            answer = QMessageBox.question(
-                self,
-                "SteamCMD 자동 설치",
-                "SteamCMD가 준비되어 있지 않습니다.\n"
-                "WorkshopPilot 관리 영역에 자동 설치할까요?",
-            )
-            if answer != QMessageBox.Yes:
-                return
-            self._pending_batch_context = context
-            self._install_managed_steamcmd()
-            return
-
-        self.main_tabs.setCurrentIndex(0)
-        self._enqueue_batch_context(context)
-
     def _on_auth_mode_changed(self, *_args: object) -> None:
         mode = self._current_auth_mode()
         # In auto mode the username is optional and used only when anonymous fails.
@@ -2185,10 +1847,6 @@ class MainWindow(QMainWindow):
 
         if hasattr(self, "installed_tree"):
             self._scan_installed_mods()
-        if hasattr(self, "diagnostic_issue_tree"):
-            self.rimworld_diagnostic_report = None
-            self.diagnostic_summary_label.setText("변경됨 — 다시 진단 필요")
-            self.diagnostic_download_missing_btn.setEnabled(False)
 
         if self._queue_cancel_requested:
             self._finish_queue()

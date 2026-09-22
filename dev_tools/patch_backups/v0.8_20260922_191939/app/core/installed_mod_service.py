@@ -1,13 +1,11 @@
 from __future__ import annotations
 
-import re
 import shutil
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
 from app.core.install_metadata_service import InstallMetadataService
 from app.models.installed_mod import InstalledMod
-from app.models.rimworld_diagnostic import RimWorldDependency
 
 
 class InstalledModService:
@@ -149,20 +147,6 @@ class InstalledModService:
         if target_version and target_version not in versions:
             versions.append(target_version)
 
-        dependencies = self._parse_dependencies(root)
-        load_after = self._parse_package_list(
-            root,
-            ("loadAfter", "forceLoadAfter"),
-        )
-        load_before = self._parse_package_list(
-            root,
-            ("loadBefore", "forceLoadBefore"),
-        )
-        incompatible_with = self._parse_package_list(
-            root,
-            ("incompatibleWith",),
-        )
-
         return InstalledMod(
             folder_name=mod_dir.name,
             path=mod_dir,
@@ -175,91 +159,7 @@ class InstalledModService:
             message="정상",
             installed_remote_time_updated=baseline,
             update_status=update_status,
-            dependencies=dependencies,
-            load_after=load_after,
-            load_before=load_before,
-            incompatible_with=incompatible_with,
         )
-
-
-    @classmethod
-    def _parse_dependencies(
-        cls,
-        root: ET.Element,
-    ) -> tuple[RimWorldDependency, ...]:
-        node = root.find("modDependencies")
-        if node is None:
-            return ()
-
-        result: list[RimWorldDependency] = []
-        seen: set[str] = set()
-
-        for child in list(node):
-            package_id = ""
-            display_name = ""
-            steam_url = ""
-            download_url = ""
-
-            if child.tag.lower() == "li":
-                package_id = (child.findtext("packageId") or "").strip()
-                display_name = (child.findtext("displayName") or "").strip()
-                steam_url = (child.findtext("steamWorkshopUrl") or "").strip()
-                download_url = (child.findtext("downloadUrl") or "").strip()
-
-                # Very old/simple metadata may use <li>package.id</li>.
-                if not package_id and child.text:
-                    package_id = child.text.strip()
-
-            package_id = package_id.strip()
-            if not package_id:
-                continue
-
-            normalized = package_id.lower()
-            if normalized in seen:
-                continue
-            seen.add(normalized)
-
-            workshop_id = ""
-            match = re.search(r"[?&]id=(\d+)", steam_url)
-            if match:
-                workshop_id = match.group(1)
-
-            result.append(
-                RimWorldDependency(
-                    package_id=package_id,
-                    display_name=display_name,
-                    steam_workshop_url=steam_url,
-                    download_url=download_url,
-                    workshop_id=workshop_id,
-                )
-            )
-
-        return tuple(result)
-
-    @staticmethod
-    def _parse_package_list(
-        root: ET.Element,
-        tag_names: tuple[str, ...],
-    ) -> tuple[str, ...]:
-        result: list[str] = []
-        seen: set[str] = set()
-
-        for tag_name in tag_names:
-            node = root.find(tag_name)
-            if node is None:
-                continue
-
-            for child in list(node):
-                value = (child.text or "").strip()
-                if not value:
-                    continue
-                normalized = value.lower()
-                if normalized in seen:
-                    continue
-                seen.add(normalized)
-                result.append(value)
-
-        return tuple(result)
 
 
     @staticmethod

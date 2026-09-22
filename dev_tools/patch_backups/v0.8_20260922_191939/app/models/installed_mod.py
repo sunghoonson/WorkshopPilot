@@ -3,8 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from app.models.rimworld_diagnostic import RimWorldDependency
-
 
 @dataclass(slots=True)
 class InstalledMod:
@@ -20,10 +18,6 @@ class InstalledMod:
     installed_remote_time_updated: int = 0
     remote_time_updated: int = 0
     update_status: str = "unknown"
-    dependencies: tuple[RimWorldDependency, ...] = ()
-    load_after: tuple[str, ...] = ()
-    load_before: tuple[str, ...] = ()
-    incompatible_with: tuple[str, ...] = ()
 
     @property
     def workshop_url(self) -> str:

@@ -134,28 +134,6 @@ WorkshopPilot이 모드를 성공적으로 설치하면 당시 Steam Workshop의
 `기준 없음`은 v0.7 이전에 설치된 모드처럼 WorkshopPilot이 정확한 설치 기준 시각을 기록하지 못한 항목입니다.
 이 항목은 한 번 `재설치 / 업데이트`하면 이후부터 정확한 업데이트 비교가 가능합니다.
 
-
-## v0.8 RimWorld 의존성 / 로드 순서 진단
-
-`RimWorld 진단` 탭에서 설치된 `About/About.xml`과 현재 `ModsConfig.xml`을 함께 분석합니다.
-
-진단 항목:
-
-```text
-필수 모드 누락
-필수 모드 비활성
-loadAfter / loadBefore 위반
-비호환 모드
-Package ID 중복
-활성 목록에는 있으나 파일이 없는 모드
-```
-
-`modDependencies`에 Steam Workshop URL이 포함되어 있으면 Workshop ID를 추출해
-`누락 의존성 다운로드` 버튼으로 기존 순차 다운로드 큐에 추가할 수 있습니다.
-
-v0.8은 안전을 위해 `ModsConfig.xml`을 자동 수정하지 않습니다.
-로드 순서 변경은 다음 단계에서 백업 + 사용자 승인 구조로 추가할 예정입니다.
-
 ## 빠른 시작
 
 1. `SETUP_VENV.bat`

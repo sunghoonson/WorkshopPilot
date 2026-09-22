@@ -1,20 +1,5 @@
 # Changelog
 
-## v0.8 - RimWorld dependency / load-order diagnostics
-
-- RimWorld About.xml의 `modDependencies` 파싱
-- `loadAfter` / `loadBefore` / `forceLoadAfter` / `forceLoadBefore` 파싱
-- `incompatibleWith` 파싱
-- `%USERPROFILE%\AppData\LocalLow\Ludeon Studios\RimWorld by Ludeon Studios\Config\ModsConfig.xml` 활성 로드 순서 분석
-- 새 `RimWorld 진단` 탭 추가
-- 필수 모드 누락 / 설치됐지만 비활성 / 로드 순서 위반 / 비호환 / Package ID 중복 진단
-- ModsConfig에는 활성화되어 있지만 현재 Mods 폴더에 없는 항목 경고
-- Core/DLC(`ludeon.rimworld*`)는 게임 내장 항목으로 인식
-- dependency의 `steamWorkshopUrl`에서 Workshop ID를 추출
-- Workshop ID를 알 수 있는 누락 의존성은 `누락 의존성 다운로드`로 기존 다운로드 큐에 자동 추가
-- 설치된 모드 상세 정보에 필수 의존성 / Load After / Load Before / 비호환 정보 표시
-- v0.8에서는 ModsConfig를 자동 수정하지 않고 진단만 수행
-
 ## v0.7 - Workshop update tracking
 
 - 설치 성공 시 Workshop `time_updated`를 `%LOCALAPPDATA%\WorkshopPilot\state\installations.json`에 기록
