@@ -11,6 +11,5 @@
   },
   "steamcmd_mode": "managed_preferred",
   "steam_auth_mode": "auto",
-  "steam_username": "",
-  "queue_auto_start": true
+  "steam_username": ""
 }

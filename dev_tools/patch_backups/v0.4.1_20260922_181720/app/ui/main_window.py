@@ -20,13 +20,10 @@ from PySide6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QMainWindow,
-    QProgressBar,
     QMessageBox,
     QPushButton,
     QPlainTextEdit,
     QSplitter,
-    QTreeWidget,
-    QTreeWidgetItem,
     QVBoxLayout,
     QWidget,
 )
@@ -38,7 +35,6 @@ from app.core.steamcmd_manager import SteamCmdManager
 from app.core.steamcmd_service import SteamCmdService
 from app.core.workshop_service import WorkshopService
 from app.games.registry import get_game_adapter
-from app.models.download_task import DownloadTask
 from app.models.game import GameSearchResult
 from app.models.workshop_item import WorkshopItem
 
@@ -94,14 +90,7 @@ class MainWindow(QMainWindow):
         self.pixmap_cache: dict[str, QPixmap] = {}
         self._thumbnail_generation = 0
         self._active_workers: set[FunctionWorker] = set()
-        self._pending_download_id = ""  # legacy single-download compatibility
-        self._pending_batch_context: dict[str, object] | None = None
-
-        self.download_tasks: dict[str, DownloadTask] = {}
-        self.download_queue_order: list[str] = []
-        self.queue_rows: dict[str, QTreeWidgetItem] = {}
-        self._queue_running = False
-        self._queue_cancel_requested = False
+        self._pending_download_id = ""
         self._active_download_id = ""
         self._active_download_app_id = ""
         self._active_mods_root = ""
@@ -183,30 +172,12 @@ class MainWindow(QMainWindow):
         search_row.addWidget(self.mod_search_btn)
         layout.addLayout(search_row)
 
-        selection_row = QHBoxLayout()
-        self.checked_count_label = QLabel("체크 0개")
-        self.check_all_btn = QPushButton("전체 체크")
-        self.check_all_btn.clicked.connect(self._check_all_results)
-        self.clear_checks_btn = QPushButton("체크 해제")
-        self.clear_checks_btn.clicked.connect(self._clear_result_checks)
-        self.batch_download_btn = QPushButton("체크 모드 다운로드 / 설치")
-        self.batch_download_btn.setEnabled(False)
-        self.batch_download_btn.clicked.connect(self._download_checked_mods)
-
-        selection_row.addWidget(self.checked_count_label)
-        selection_row.addWidget(self.check_all_btn)
-        selection_row.addWidget(self.clear_checks_btn)
-        selection_row.addStretch(1)
-        selection_row.addWidget(self.batch_download_btn)
-        layout.addLayout(selection_row)
-
         splitter = QSplitter(Qt.Horizontal)
 
         self.mod_list = QListWidget()
         self.mod_list.setIconSize(QSize(96, 96))
         self.mod_list.setSpacing(3)
         self.mod_list.currentItemChanged.connect(self._on_mod_selected)
-        self.mod_list.itemChanged.connect(self._on_result_item_changed)
         splitter.addWidget(self.mod_list)
 
         right = QWidget()
@@ -239,42 +210,6 @@ class MainWindow(QMainWindow):
         splitter.addWidget(right)
         splitter.setSizes([520, 780])
         layout.addWidget(splitter, 1)
-
-        queue_title_row = QHBoxLayout()
-        queue_title_row.addWidget(QLabel("다운로드 큐"))
-        self.queue_summary_label = QLabel("대기열 없음")
-        queue_title_row.addWidget(self.queue_summary_label)
-        queue_title_row.addStretch(1)
-
-        self.retry_failed_btn = QPushButton("실패 항목 재시도")
-        self.retry_failed_btn.setEnabled(False)
-        self.retry_failed_btn.clicked.connect(self._retry_failed_tasks)
-        self.cancel_queue_btn = QPushButton("큐 중지")
-        self.cancel_queue_btn.setEnabled(False)
-        self.cancel_queue_btn.clicked.connect(self._cancel_download_queue)
-        self.clear_queue_btn = QPushButton("완료/실패 기록 지우기")
-        self.clear_queue_btn.clicked.connect(self._clear_download_queue)
-
-        queue_title_row.addWidget(self.retry_failed_btn)
-        queue_title_row.addWidget(self.cancel_queue_btn)
-        queue_title_row.addWidget(self.clear_queue_btn)
-        layout.addLayout(queue_title_row)
-
-        self.queue_tree = QTreeWidget()
-        self.queue_tree.setHeaderLabels(["상태", "모드", "Workshop ID", "메시지"])
-        self.queue_tree.setRootIsDecorated(False)
-        self.queue_tree.setAlternatingRowColors(True)
-        self.queue_tree.setMaximumHeight(170)
-        self.queue_tree.setColumnWidth(0, 110)
-        self.queue_tree.setColumnWidth(1, 330)
-        self.queue_tree.setColumnWidth(2, 130)
-        layout.addWidget(self.queue_tree)
-
-        self.queue_progress = QProgressBar()
-        self.queue_progress.setRange(0, 1)
-        self.queue_progress.setValue(0)
-        self.queue_progress.setFormat("대기열 없음")
-        layout.addWidget(self.queue_progress)
 
         layout.addWidget(QLabel("로그"))
         self.log = QPlainTextEdit()
@@ -329,21 +264,10 @@ class MainWindow(QMainWindow):
             str(self.settings.get("steamcmd_path", "") or "")
         )
         if resolved is None:
-            if self.steamcmd_manager.managed_exe.is_file():
-                self.steam_status_label.setText(
-                    "△ SteamCMD 파일 있음 — 초기화/복구 필요"
-                )
-                self.steam_status_label.setToolTip(
-                    "steamcmd.exe는 존재하지만 WorkshopPilot 준비 확인이 끝나지 않았습니다.\n"
-                    f"관리형 위치: {self.steamcmd_manager.managed_root}"
-                )
-            else:
-                self.steam_status_label.setText(
-                    "○ 설치되지 않음 — 다운로드 시 자동 설치 가능"
-                )
-                self.steam_status_label.setToolTip(
-                    f"관리형 설치 위치: {self.steamcmd_manager.managed_root}"
-                )
+            self.steam_status_label.setText("○ 설치되지 않음 — 다운로드 시 자동 설치 가능")
+            self.steam_status_label.setToolTip(
+                f"관리형 설치 위치: {self.steamcmd_manager.managed_root}"
+            )
             return
 
         mode, path = resolved
@@ -395,11 +319,7 @@ class MainWindow(QMainWindow):
         self._refresh_steam_tool_status()
         self._log("INFO", f"관리형 SteamCMD 준비 완료: {payload}")
 
-        if self._pending_batch_context is not None:
-            context = self._pending_batch_context
-            self._pending_batch_context = None
-            self._enqueue_batch_context(context)
-        elif self._pending_download_id:
+        if self._pending_download_id:
             pending = self._pending_download_id
             self._pending_download_id = ""
             current = self.mod_list.currentItem()
@@ -411,7 +331,6 @@ class MainWindow(QMainWindow):
         self.install_steamcmd_btn.setEnabled(True)
         self.external_steamcmd_btn.setEnabled(True)
         self._pending_download_id = ""
-        self._pending_batch_context = None
         self._refresh_steam_tool_status()
         self._log("ERROR", f"SteamCMD 설치/복구 실패: {message}")
         QMessageBox.warning(self, "SteamCMD 설치 실패", message)
@@ -529,8 +448,6 @@ class MainWindow(QMainWindow):
         self.open_workshop_btn.setEnabled(False)
         self.download_btn.setEnabled(False)
         self.workshop_items.clear()
-        self.checked_count_label.setText("체크 0개")
-        self.batch_download_btn.setEnabled(False)
         self._thumbnail_generation += 1
 
         self._log(
@@ -568,13 +485,6 @@ class MainWindow(QMainWindow):
             self.workshop_items[item.published_file_id] = item
             list_item = QListWidgetItem(self._list_item_text(item))
             list_item.setData(Qt.UserRole, item.published_file_id)
-            list_item.setFlags(
-                list_item.flags()
-                | Qt.ItemIsUserCheckable
-                | Qt.ItemIsSelectable
-                | Qt.ItemIsEnabled
-            )
-            list_item.setCheckState(Qt.Unchecked)
             list_item.setSizeHint(QSize(100, 108))
             self.mod_list.addItem(list_item)
 
@@ -596,47 +506,23 @@ class MainWindow(QMainWindow):
         QMessageBox.warning(self, "Workshop 검색 실패", message)
 
     def _download_selected_mod(self) -> None:
+        if self.steamcmd_service.is_running:
+            QMessageBox.information(self, "다운로드", "이미 SteamCMD 다운로드가 진행 중입니다.")
+            return
+
         current = self.mod_list.currentItem()
         if current is None:
             return
+
         workshop_id = str(current.data(Qt.UserRole) or "")
-        if workshop_id:
-            self._start_download_requests([workshop_id])
-
-    def _download_checked_mods(self) -> None:
-        workshop_ids = self._checked_workshop_ids()
-        if not workshop_ids:
-            QMessageBox.information(
-                self,
-                "다운로드",
-                "체크된 Workshop 모드가 없습니다.",
-            )
-            return
-        self._start_download_requests(workshop_ids)
-
-    def _start_download_requests(self, workshop_ids: list[str]) -> None:
+        item = self.workshop_items.get(workshop_id)
         app_id = self._resolved_app_id()
         mods_path_text = self.mods_edit.text().strip()
 
-        if not app_id:
-            QMessageBox.warning(self, "다운로드", "게임/App ID를 먼저 지정해 주세요.")
+        if item is None or not app_id:
             return
         if not mods_path_text:
             QMessageBox.warning(self, "다운로드", "Mods 경로를 먼저 지정해 주세요.")
-            return
-
-        valid_items: list[WorkshopItem] = []
-        seen: set[str] = set()
-        for workshop_id in workshop_ids:
-            if workshop_id in seen:
-                continue
-            seen.add(workshop_id)
-            item = self.workshop_items.get(workshop_id)
-            if item is not None:
-                valid_items.append(item)
-
-        if not valid_items:
-            QMessageBox.warning(self, "다운로드", "다운로드할 유효한 모드가 없습니다.")
             return
 
         mods_root = Path(mods_path_text)
@@ -644,7 +530,7 @@ class MainWindow(QMainWindow):
             answer = QMessageBox.question(
                 self,
                 "Mods 폴더 생성",
-                f"Mods 폴더가 없습니다. 생성할까요?\\n\\n{mods_root}",
+                f"Mods 폴더가 없습니다. 생성할까요?\n\n{mods_root}",
             )
             if answer != QMessageBox.Yes:
                 return
@@ -654,31 +540,6 @@ class MainWindow(QMainWindow):
                 QMessageBox.warning(self, "Mods 폴더", str(exc))
                 return
 
-        auth_mode = self._current_auth_mode()
-        username = self.steam_username_edit.text().strip()
-        if auth_mode == "account" and not username:
-            username, ok = QInputDialog.getText(
-                self,
-                "Steam 계정",
-                "Steam 계정명을 입력해 주세요.",
-            )
-            username = username.strip()
-            if not ok or not username:
-                self._log("INFO", "Steam 계정 로그인을 취소했습니다.")
-                return
-            self.steam_username_edit.setText(username)
-
-        context: dict[str, object] = {
-            "app_id": app_id,
-            "mods_root": str(mods_root),
-            "auth_mode": auth_mode,
-            "username": username,
-            "items": [
-                (item.published_file_id, item.title)
-                for item in valid_items
-            ],
-        }
-
         resolved = self.steamcmd_manager.resolve(
             str(self.settings.get("steamcmd_path", "") or "")
         )
@@ -686,349 +547,61 @@ class MainWindow(QMainWindow):
             answer = QMessageBox.question(
                 self,
                 "SteamCMD 자동 설치",
-                "SteamCMD가 준비되어 있지 않습니다.\\n"
+                "SteamCMD가 준비되어 있지 않습니다.\n"
                 "WorkshopPilot 관리 영역에 자동 설치할까요?",
             )
             if answer != QMessageBox.Yes:
                 return
-            self._pending_batch_context = context
+            self._pending_download_id = workshop_id
             self._install_managed_steamcmd()
             return
 
-        self._enqueue_batch_context(context)
-
-    def _enqueue_batch_context(self, context: dict[str, object]) -> None:
-        app_id = str(context.get("app_id", "") or "")
-        mods_root = str(context.get("mods_root", "") or "")
-        auth_mode = str(context.get("auth_mode", "auto") or "auto")
-        username = str(context.get("username", "") or "")
-        items = list(context.get("items", []) or [])
-
-        added = 0
-        reset = 0
-        for raw in items:
-            workshop_id, title = raw
-            workshop_id = str(workshop_id)
-            title = str(title)
-
-            task = self.download_tasks.get(workshop_id)
-            if task is None:
-                task = DownloadTask(
-                    workshop_id=workshop_id,
-                    title=title,
-                    app_id=app_id,
-                    mods_root=mods_root,
-                    auth_mode=auth_mode,
-                    username=username,
-                )
-                self.download_tasks[workshop_id] = task
-                self.download_queue_order.append(workshop_id)
-
-                row = QTreeWidgetItem(
-                    ["대기", task.title, task.workshop_id, ""]
-                )
-                row.setData(0, Qt.UserRole, workshop_id)
-                self.queue_tree.addTopLevelItem(row)
-                self.queue_rows[workshop_id] = row
-                added += 1
-            elif task.status not in {"downloading", "installing"}:
-                task.title = title
-                task.app_id = app_id
-                task.mods_root = mods_root
-                task.auth_mode = auth_mode
-                task.username = username
-                task.status = "queued"
-                task.message = ""
-                reset += 1
-                self._refresh_queue_row(task)
-
-        self._queue_cancel_requested = False
-        self._log(
-            "INFO",
-            f"다운로드 큐 등록: 신규 {added}개 / 다시 대기 {reset}개 / "
-            f"총 {len(self.download_tasks)}개",
-        )
-        self._update_queue_summary()
-        self._start_next_queue_task()
-
-    def _start_next_queue_task(self) -> None:
-        if self._active_download_id:
-            return
-
-        if self._queue_cancel_requested:
-            self._finish_queue()
-            return
-
-        next_task: DownloadTask | None = None
-        for workshop_id in self.download_queue_order:
-            task = self.download_tasks.get(workshop_id)
-            if task is not None and task.status == "queued":
-                next_task = task
-                break
-
-        if next_task is None:
-            self._finish_queue()
-            return
-
-        resolved = self.steamcmd_manager.resolve(
-            str(self.settings.get("steamcmd_path", "") or "")
-        )
-        if resolved is None:
-            next_task.status = "failed"
-            next_task.message = "SteamCMD를 찾을 수 없습니다."
-            self._refresh_queue_row(next_task)
-            self._log("ERROR", next_task.message)
-            self._start_next_queue_task()
-            return
-
         mode, steamcmd_exe = resolved
+        self._active_download_id = workshop_id
+        self._active_download_app_id = app_id
+        self._active_mods_root = str(mods_root)
 
-        self._queue_running = True
-        self._active_download_id = next_task.workshop_id
-        self._active_download_app_id = next_task.app_id
-        self._active_mods_root = next_task.mods_root
-        next_task.status = "downloading"
-        next_task.message = f"SteamCMD={mode}"
-        next_task.attempts += 1
-        self._refresh_queue_row(next_task)
-        self._set_queue_controls_running(True)
-        self._update_queue_summary()
-
+        self.download_btn.setEnabled(False)
+        self.download_btn.setText("SteamCMD 다운로드 중...")
         self._log(
             "INFO",
-            f"[큐] 다운로드 시작: {next_task.title} / "
-            f"{next_task.workshop_id} / {next_task.attempts}회차",
-        )
-        self._log(
-            "INFO",
-            f"Steam 인증 방식: {self._auth_mode_label(next_task.auth_mode)}",
+            f"모드 다운로드 시작: {item.title} / {workshop_id} / SteamCMD={mode}",
         )
 
         try:
-            self.steamcmd_service.download_workshop_item(
-                steamcmd_exe=steamcmd_exe,
-                app_id=next_task.app_id,
-                workshop_id=next_task.workshop_id,
-                auth_mode=next_task.auth_mode,
-                username=next_task.username,
-            )
-        except Exception as exc:
-            next_task.status = "failed"
-            next_task.message = f"SteamCMD 실행 실패: {exc}"
-            self._refresh_queue_row(next_task)
-            self._log("ERROR", next_task.message)
-            self._active_download_id = ""
-            self._start_next_queue_task()
+            auth_mode = self._current_auth_mode()
+            username = self.steam_username_edit.text().strip()
 
-    def _finish_queue(self) -> None:
-        was_running = self._queue_running
-        self._queue_running = False
-        self._active_download_id = ""
-        self._active_download_app_id = ""
-        self._active_mods_root = ""
-        self._set_queue_controls_running(False)
-        self._update_queue_summary()
+            if auth_mode == "account" and not username:
+                username, ok = QInputDialog.getText(
+                    self,
+                    "Steam 계정",
+                    "Steam 계정명을 입력해 주세요.",
+                )
+                username = username.strip()
+                if not ok or not username:
+                    self.download_btn.setEnabled(True)
+                    self.download_btn.setText("선택 모드 다운로드 / 설치")
+                    self._log("INFO", "Steam 계정 로그인을 취소했습니다.")
+                    return
+                self.steam_username_edit.setText(username)
 
-        if not was_running:
-            return
-
-        completed = sum(
-            1 for task in self.download_tasks.values()
-            if task.status == "completed"
-        )
-        failed = sum(
-            1 for task in self.download_tasks.values()
-            if task.status == "failed"
-        )
-        cancelled = sum(
-            1 for task in self.download_tasks.values()
-            if task.status == "cancelled"
-        )
-
-        self._log(
-            "INFO",
-            f"다운로드 큐 종료: 완료 {completed} / 실패 {failed} / 취소 {cancelled}",
-        )
-
-        if failed:
-            QMessageBox.warning(
-                self,
-                "다운로드 큐 완료",
-                f"완료 {completed}개 / 실패 {failed}개 / 취소 {cancelled}개\\n\\n"
-                "실패 항목은 '실패 항목 재시도'로 다시 실행할 수 있습니다.",
-            )
-        else:
-            QMessageBox.information(
-                self,
-                "다운로드 큐 완료",
-                f"완료 {completed}개 / 취소 {cancelled}개",
-            )
-
-    def _retry_failed_tasks(self) -> None:
-        count = 0
-        for task in self.download_tasks.values():
-            if task.status == "failed":
-                task.status = "queued"
-                task.message = ""
-                self._refresh_queue_row(task)
-                count += 1
-
-        if not count:
-            return
-
-        self._queue_cancel_requested = False
-        self._log("INFO", f"실패 항목 재시도: {count}개")
-        self._update_queue_summary()
-        self._start_next_queue_task()
-
-    def _cancel_download_queue(self) -> None:
-        if not self._queue_running:
-            return
-
-        self._queue_cancel_requested = True
-        for task in self.download_tasks.values():
-            if task.status == "queued":
-                task.status = "cancelled"
-                task.message = "사용자 취소"
-                self._refresh_queue_row(task)
-
-        active = self.download_tasks.get(self._active_download_id)
-        if active is not None and active.status == "downloading":
-            active.status = "cancelled"
-            active.message = "사용자 취소"
-            self._refresh_queue_row(active)
-            self.steamcmd_service.cancel_current("사용자가 다운로드 큐를 중지했습니다.")
-        elif active is None:
-            self._finish_queue()
-        else:
             self._log(
                 "INFO",
-                "현재 Mods 폴더 설치 작업이 끝난 뒤 큐를 중지합니다.",
+                f"Steam 인증 방식: {self._auth_mode_label(auth_mode)}",
             )
-
-        self._update_queue_summary()
-
-    def _clear_download_queue(self) -> None:
-        if self._queue_running:
-            QMessageBox.information(
-                self,
-                "다운로드 큐",
-                "큐가 실행 중일 때는 기록을 지울 수 없습니다.",
+            self.steamcmd_service.download_workshop_item(
+                steamcmd_exe=steamcmd_exe,
+                app_id=app_id,
+                workshop_id=workshop_id,
+                auth_mode=auth_mode,
+                username=username,
             )
-            return
-
-        self.download_tasks.clear()
-        self.download_queue_order.clear()
-        self.queue_rows.clear()
-        self.queue_tree.clear()
-        self._queue_cancel_requested = False
-        self._update_queue_summary()
-
-    def _check_all_results(self) -> None:
-        self.mod_list.blockSignals(True)
-        try:
-            for row in range(self.mod_list.count()):
-                self.mod_list.item(row).setCheckState(Qt.Checked)
-        finally:
-            self.mod_list.blockSignals(False)
-        self._update_checked_count()
-
-    def _clear_result_checks(self) -> None:
-        self.mod_list.blockSignals(True)
-        try:
-            for row in range(self.mod_list.count()):
-                self.mod_list.item(row).setCheckState(Qt.Unchecked)
-        finally:
-            self.mod_list.blockSignals(False)
-        self._update_checked_count()
-
-    def _checked_workshop_ids(self) -> list[str]:
-        result: list[str] = []
-        for row in range(self.mod_list.count()):
-            list_item = self.mod_list.item(row)
-            if list_item.checkState() == Qt.Checked:
-                workshop_id = str(list_item.data(Qt.UserRole) or "")
-                if workshop_id:
-                    result.append(workshop_id)
-        return result
-
-    @Slot(QListWidgetItem)
-    def _on_result_item_changed(self, _item: QListWidgetItem) -> None:
-        self._update_checked_count()
-
-    def _update_checked_count(self) -> None:
-        count = len(self._checked_workshop_ids())
-        self.checked_count_label.setText(f"체크 {count}개")
-        self.batch_download_btn.setEnabled(count > 0)
-
-    def _refresh_queue_row(self, task: DownloadTask) -> None:
-        row = self.queue_rows.get(task.workshop_id)
-        if row is None:
-            return
-
-        status_text = {
-            "queued": "대기",
-            "downloading": "다운로드 중",
-            "installing": "설치 중",
-            "completed": "완료",
-            "failed": "실패",
-            "cancelled": "취소",
-        }.get(task.status, task.status)
-
-        row.setText(0, status_text)
-        row.setText(1, task.title)
-        row.setText(2, task.workshop_id)
-        row.setText(3, task.message)
-
-    def _update_queue_summary(self) -> None:
-        tasks = list(self.download_tasks.values())
-        total = len(tasks)
-
-        completed = sum(task.status == "completed" for task in tasks)
-        failed = sum(task.status == "failed" for task in tasks)
-        cancelled = sum(task.status == "cancelled" for task in tasks)
-        queued = sum(task.status == "queued" for task in tasks)
-        working = sum(
-            task.status in {"downloading", "installing"}
-            for task in tasks
-        )
-
-        finished = completed + failed + cancelled
-        self.queue_progress.setRange(0, max(1, total))
-        self.queue_progress.setValue(finished)
-        if total:
-            self.queue_progress.setFormat(
-                f"{finished}/{total} 완료 처리 "
-                f"(성공 {completed} / 실패 {failed} / 취소 {cancelled})"
-            )
-            self.queue_summary_label.setText(
-                f"총 {total} / 대기 {queued} / 작업 {working} / "
-                f"완료 {completed} / 실패 {failed}"
-            )
-        else:
-            self.queue_progress.setFormat("대기열 없음")
-            self.queue_summary_label.setText("대기열 없음")
-
-        self.retry_failed_btn.setEnabled(
-            failed > 0 and not self._queue_running
-        )
-
-    def _set_queue_controls_running(self, running: bool) -> None:
-        self.cancel_queue_btn.setEnabled(running)
-        self.retry_failed_btn.setEnabled(
-            (not running)
-            and any(
-                task.status == "failed"
-                for task in self.download_tasks.values()
-            )
-        )
-        self.clear_queue_btn.setEnabled(not running)
-        self.download_btn.setEnabled(
-            (not running) and self.mod_list.currentItem() is not None
-        )
-        self.batch_download_btn.setEnabled(
-            (not running) and bool(self._checked_workshop_ids())
-        )
+        except Exception as exc:
+            self.download_btn.setEnabled(True)
+            self.download_btn.setText("선택 모드 다운로드 / 설치")
+            self._log("ERROR", f"SteamCMD 실행 실패: {exc}")
+            QMessageBox.warning(self, "SteamCMD 실행 실패", str(exc))
 
     def _on_auth_mode_changed(self, *_args: object) -> None:
         mode = self._current_auth_mode()
@@ -1142,59 +715,29 @@ class MainWindow(QMainWindow):
             )
 
     @Slot(bool, str, str)
-    def _on_steamcmd_completed(
-        self,
-        success: bool,
-        message: str,
-        source_path: str,
-    ) -> None:
-        workshop_id = self._active_download_id
-        task = self.download_tasks.get(workshop_id)
-
-        if task is None:
-            self._log(
-                "ERROR",
-                f"활성 다운로드 큐 항목을 찾지 못했습니다: {workshop_id}",
-            )
-            self._active_download_id = ""
-            self._start_next_queue_task()
-            return
-
-        if self._queue_cancel_requested and task.status == "cancelled":
-            self._log("INFO", f"[큐] 다운로드 취소: {task.title}")
-            self._active_download_id = ""
-            self._finish_queue()
-            return
-
+    def _on_steamcmd_completed(self, success: bool, message: str, source_path: str) -> None:
         if not success:
-            task.status = "failed"
-            task.message = message
-            self._refresh_queue_row(task)
-            self._log(
-                "ERROR",
-                f"[큐] 다운로드 실패: {task.title} / {message}",
-            )
-            self._active_download_id = ""
-            self._update_queue_summary()
-            self._start_next_queue_task()
+            self.download_btn.setEnabled(True)
+            self.download_btn.setText("선택 모드 다운로드 / 설치")
+            self._log("ERROR", message)
+            QMessageBox.warning(self, "모드 다운로드 실패", message)
             return
 
         self._log("INFO", message)
-        task.status = "installing"
-        task.message = "Mods 폴더에 설치 중..."
-        self._refresh_queue_row(task)
-        self._update_queue_summary()
+        self.download_btn.setText("Mods 폴더 설치 중...")
 
+        app_id = self._active_download_app_id
+        workshop_id = self._active_download_id
+        mods_root = Path(self._active_mods_root)
         source = Path(source_path)
-        mods_root = Path(task.mods_root)
-        adapter = get_game_adapter(task.app_id)
+        adapter = get_game_adapter(app_id)
         validator = adapter.validate_mod_folder if adapter is not None else None
 
         worker = FunctionWorker(
             fn=lambda: install_mod_folder(
                 source=source,
                 mods_root=mods_root,
-                destination_name=task.workshop_id,
+                destination_name=workshop_id,
                 validator=validator,
             )
         )
@@ -1203,66 +746,33 @@ class MainWindow(QMainWindow):
         self._start_worker(worker)
 
     @Slot(object)
-    @Slot(object)
     def _on_mod_install_success(self, payload: object) -> None:
         workshop_id = self._active_download_id
-        task = self.download_tasks.get(workshop_id)
-
-        if task is not None:
-            task.status = "completed"
-            task.message = str(payload)
-            self._refresh_queue_row(task)
-
         item = self.workshop_items.get(workshop_id)
         if item is not None:
             item.installed = True
             self._refresh_list_item(workshop_id)
 
-        self._log(
-            "INFO",
-            f"[큐] Mods 폴더 설치 완료: "
-            f"{task.title if task else workshop_id} / {payload}",
-        )
+        self.download_btn.setEnabled(True)
+        self.download_btn.setText("선택 모드 다운로드 / 설치")
+        self._log("INFO", f"Mods 폴더 설치 완료: {payload}")
 
         current = self.mod_list.currentItem()
         if current is not None:
             self._on_mod_selected(current, None)
 
-        self._active_download_id = ""
-        self._active_download_app_id = ""
-        self._active_mods_root = ""
-        self._update_queue_summary()
-
-        if self._queue_cancel_requested:
-            self._finish_queue()
-        else:
-            self._start_next_queue_task()
+        QMessageBox.information(
+            self,
+            "설치 완료",
+            f"모드 설치가 완료되었습니다.\n\n{payload}",
+        )
 
     @Slot(str)
     def _on_mod_install_error(self, message: str) -> None:
-        workshop_id = self._active_download_id
-        task = self.download_tasks.get(workshop_id)
-
-        if task is not None:
-            task.status = "failed"
-            task.message = message
-            self._refresh_queue_row(task)
-
-        self._log(
-            "ERROR",
-            f"[큐] Mods 폴더 설치 실패: "
-            f"{task.title if task else workshop_id} / {message}",
-        )
-
-        self._active_download_id = ""
-        self._active_download_app_id = ""
-        self._active_mods_root = ""
-        self._update_queue_summary()
-
-        if self._queue_cancel_requested:
-            self._finish_queue()
-        else:
-            self._start_next_queue_task()
+        self.download_btn.setEnabled(True)
+        self.download_btn.setText("선택 모드 다운로드 / 설치")
+        self._log("ERROR", f"Mods 폴더 설치 실패: {message}")
+        QMessageBox.warning(self, "모드 설치 실패", message)
 
     def _refresh_list_item(self, workshop_id: str) -> None:
         item = self.workshop_items.get(workshop_id)
@@ -1351,9 +861,7 @@ class MainWindow(QMainWindow):
             return
 
         self.open_workshop_btn.setEnabled(True)
-        self.download_btn.setEnabled(
-            not self.steamcmd_service.is_running and not self._queue_running
-        )
+        self.download_btn.setEnabled(not self.steamcmd_service.is_running)
 
         pixmap = self.pixmap_cache.get(published_id)
         if pixmap is not None:

@@ -384,41 +384,12 @@ class SteamCmdService(QObject):
 
     @staticmethod
     def _is_self_update_restart(exit_code: int, output: str) -> bool:
-        if exit_code != 7:
-            return False
-
         text = output.lower()
-
-        explicit_restart_markers = (
-            "update complete, launching",
-            "restarting steamcmd by request",
-            "업데이트 완료! steam 실행 중",
-            "업데이트 완료! steamcmd 실행 중",
-            "업데이트 완료, steam 실행 중",
-            "업데이트 완료, steamcmd 실행 중",
+        update_marker = (
+            "update complete, launching" in text
+            or "restarting steamcmd by request" in text
         )
-        if any(marker in text for marker in explicit_restart_markers):
-            return True
-
-        update_activity_markers = (
-            "downloading update",
-            "installing update",
-            "update complete",
-            "업데이트 다운로드",
-            "업데이트 설치",
-            "업데이트 완료",
-        )
-        relaunch_markers = (
-            "launching",
-            "restarting",
-            "재시작",
-            "실행 중",
-        )
-
-        return (
-            any(marker in text for marker in update_activity_markers)
-            and any(marker in text for marker in relaunch_markers)
-        )
+        return exit_code == 7 and update_marker
 
     @staticmethod
     def _looks_like_auth_required(output: str) -> bool:

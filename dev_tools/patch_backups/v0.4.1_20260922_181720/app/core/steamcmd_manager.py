@@ -66,31 +66,8 @@ class SteamCmdManager:
             raise RuntimeError("현재 자동 SteamCMD 설치는 Windows만 지원합니다.")
 
         self.managed_root.mkdir(parents=True, exist_ok=True)
-
-        # If the bootstrap EXE already exists, resume/verify it first instead of
-        # downloading the ZIP again. This is especially important after SteamCMD
-        # self-updates and exits with code 7 before WorkshopPilot can create its
-        # ready marker.
-        if self.managed_exe.is_file():
-            self._emit(
-                progress,
-                "기존 관리형 steamcmd.exe를 발견했습니다. "
-                "재다운로드 전에 초기화/업데이트를 재개합니다.",
-            )
-            try:
-                self._initialize_runtime(progress)
-            except Exception as exc:
-                self._emit(
-                    progress,
-                    "기존 SteamCMD 초기화 재개에 실패했습니다. "
-                    f"새 배포본으로 복구합니다: {type(exc).__name__}: {exc}",
-                )
-            else:
-                self._write_ready_marker()
-                self._emit(progress, f"SteamCMD 준비 완료: {self.managed_exe}")
-                return self.managed_exe
-
         self.ready_marker.unlink(missing_ok=True)
+
         zip_path = self.managed_root / "steamcmd_download.zip.part"
 
         self._emit(progress, "Valve 서버에서 SteamCMD 다운로드를 시작합니다.")
@@ -106,15 +83,13 @@ class SteamCmdManager:
         self._emit(progress, "SteamCMD 최초 초기화/업데이트를 실행합니다.")
         self._initialize_runtime(progress)
 
-        self._write_ready_marker()
-        self._emit(progress, f"SteamCMD 준비 완료: {self.managed_exe}")
-        return self.managed_exe
-
-    def _write_ready_marker(self) -> None:
         self.ready_marker.write_text(
             "WorkshopPilot verified SteamCMD runtime.\n",
             encoding="utf-8",
         )
+
+        self._emit(progress, f"SteamCMD 준비 완료: {self.managed_exe}")
+        return self.managed_exe
 
     def _initialize_runtime(self, progress: ProgressCallback | None) -> None:
         """
@@ -161,7 +136,7 @@ class SteamCmdManager:
                     "SteamCMD 자체 업데이트가 완료되어 재시작이 필요합니다. "
                     "잠시 후 자동으로 다시 실행합니다.",
                 )
-                time.sleep(2.0)
+                time.sleep(1.5)
                 continue
 
             tail = "\n".join(output.splitlines()[-16:])
@@ -178,47 +153,12 @@ class SteamCmdManager:
 
     @staticmethod
     def _is_self_update_restart(exit_code: int, output: str) -> bool:
-        """
-        SteamCMD uses exit code 7 while its bootstrapper replaces/relaunches itself.
-
-        The message is localized by SteamCMD, so matching only the English
-        "Update complete, launching..." string breaks on Korean Windows.
-        """
-        if exit_code != 7:
-            return False
-
         text = output.lower()
-
-        explicit_restart_markers = (
-            "update complete, launching",
-            "restarting steamcmd by request",
-            "업데이트 완료! steam 실행 중",
-            "업데이트 완료! steamcmd 실행 중",
-            "업데이트 완료, steam 실행 중",
-            "업데이트 완료, steamcmd 실행 중",
+        update_marker = (
+            "update complete, launching" in text
+            or "restarting steamcmd by request" in text
         )
-        if any(marker in text for marker in explicit_restart_markers):
-            return True
-
-        update_activity_markers = (
-            "downloading update",
-            "installing update",
-            "update complete",
-            "업데이트 다운로드",
-            "업데이트 설치",
-            "업데이트 완료",
-        )
-        relaunch_markers = (
-            "launching",
-            "restarting",
-            "재시작",
-            "실행 중",
-        )
-
-        return (
-            any(marker in text for marker in update_activity_markers)
-            and any(marker in text for marker in relaunch_markers)
-        )
+        return exit_code == 7 and update_marker
 
     def clear_managed_runtime(self) -> None:
         if self.managed_root.exists():
@@ -244,7 +184,7 @@ class SteamCmdManager:
             self.DOWNLOAD_URL,
             stream=True,
             timeout=self.timeout,
-            headers={"User-Agent": "WorkshopPilot/0.4.1"},
+            headers={"User-Agent": "WorkshopPilot/0.3.1"},
         ) as response:
             response.raise_for_status()
             total = int(response.headers.get("content-length") or 0)

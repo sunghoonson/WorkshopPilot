@@ -1,19 +1,5 @@
 # Changelog
 
-## v0.5 - Multi-select download queue
-
-- Workshop 검색 결과 체크박스 추가
-- 전체 체크 / 체크 해제 / 체크 모드 일괄 다운로드
-- 단일 모드 다운로드도 동일한 큐 엔진 사용
-- SteamCMD 작업을 1개씩 순차 처리하여 충돌 방지
-- 큐 상태: 대기 / 다운로드 중 / 설치 중 / 완료 / 실패 / 취소
-- 전체 큐 진행률과 성공/실패 요약 표시
-- 실패 항목만 일괄 재시도
-- 큐 중지 기능
-- 완료/실패 기록 지우기
-- 기존 Steam 인증 자동 fallback 및 Steam Guard 처리와 큐 연동
-- 개별 모드 설치 성공 후 검색 목록의 `[설치됨]` 상태 즉시 갱신
-
 ## v0.4.1 - Korean SteamCMD bootstrap / exit-code 7 fix
 
 - 한국어 SteamCMD의 `업데이트 완료! Steam 실행 중...` 메시지를 self-update restart로 인식
