@@ -1,19 +1,5 @@
 # Changelog
 
-## v0.6 - Installed mods manager
-
-- 메인 영역을 `Workshop 탐색` / `설치된 모드 관리` 탭으로 분리
-- 지정된 Mods 경로 전체 스캔
-- RimWorld `About/About.xml`에서 모드 이름 / Package ID / 저작자 / 지원 버전 파싱
-- 숫자 폴더는 Workshop ID로 자동 인식
-- 손상되거나 About.xml이 없는 RimWorld 모드는 경고 표시
-- 설치된 모드 폴더 열기 / Workshop 페이지 열기
-- 선택한 Workshop 모드 재설치 / 업데이트
-- 설치된 Workshop 모드 전체 업데이트
-- 다중 선택 삭제 + Mods 루트 직접 하위 폴더 안전 검증
-- 다운로드 큐 설치 완료 후 설치 모드 목록 자동 새로고침
-- 로컬 모드 삭제 후 Workshop 검색 결과의 `[설치됨]` 상태 즉시 갱신
-
 ## v0.5 - Multi-select download queue
 
 - Workshop 검색 결과 체크박스 추가

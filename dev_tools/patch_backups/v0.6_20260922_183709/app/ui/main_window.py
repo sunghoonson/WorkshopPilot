@@ -11,7 +11,6 @@ from PySide6.QtGui import QDesktopServices, QIcon, QPixmap
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkRequest, QNetworkReply
 from PySide6.QtWidgets import (
     QApplication,
-    QAbstractItemView,
     QFileDialog,
     QComboBox,
     QHBoxLayout,
@@ -26,14 +25,12 @@ from PySide6.QtWidgets import (
     QPushButton,
     QPlainTextEdit,
     QSplitter,
-    QTabWidget,
     QTreeWidget,
     QTreeWidgetItem,
     QVBoxLayout,
     QWidget,
 )
 
-from app.core.installed_mod_service import InstalledModService
 from app.core.installer import install_mod_folder
 from app.core.settings import load_settings, save_settings
 from app.core.steam_app_service import SteamAppService
@@ -42,7 +39,6 @@ from app.core.steamcmd_service import SteamCmdService
 from app.core.workshop_service import WorkshopService
 from app.games.registry import get_game_adapter
 from app.models.download_task import DownloadTask
-from app.models.installed_mod import InstalledMod
 from app.models.game import GameSearchResult
 from app.models.workshop_item import WorkshopItem
 
@@ -88,7 +84,6 @@ class MainWindow(QMainWindow):
         self.settings = load_settings()
         self.app_service = SteamAppService()
         self.workshop_service = WorkshopService()
-        self.installed_mod_service = InstalledModService()
         self.steamcmd_manager = SteamCmdManager()
         self.steamcmd_service = SteamCmdService(self)
         self.thread_pool = QThreadPool.globalInstance()
@@ -96,7 +91,6 @@ class MainWindow(QMainWindow):
 
         self.current_game_name = ""
         self.workshop_items: dict[str, WorkshopItem] = {}
-        self.installed_mods: dict[str, InstalledMod] = {}
         self.pixmap_cache: dict[str, QPixmap] = {}
         self._thumbnail_generation = 0
         self._active_workers: set[FunctionWorker] = set()
@@ -161,6 +155,7 @@ class MainWindow(QMainWindow):
         )
         self.auth_security_label = QLabel("비밀번호/Steam Guard 코드는 저장하지 않음")
         self.auth_security_label.setStyleSheet("QLabel { color: #777; }")
+
         auth_row.addWidget(self.auth_mode_combo)
         auth_row.addWidget(self.steam_username_edit, 1)
         auth_row.addWidget(self.auth_security_label)
@@ -175,16 +170,6 @@ class MainWindow(QMainWindow):
         mods_row.addWidget(mods_btn)
         layout.addLayout(mods_row)
 
-        self.main_tabs = QTabWidget()
-        self.main_tabs.currentChanged.connect(self._on_main_tab_changed)
-        layout.addWidget(self.main_tabs, 1)
-
-        # -------------------------------------------------------------
-        # Workshop 탐색 탭
-        # -------------------------------------------------------------
-        browse_tab = QWidget()
-        browse_layout = QVBoxLayout(browse_tab)
-
         search_row = QHBoxLayout()
         search_row.addWidget(QLabel("Workshop 검색"))
         self.mod_search_edit = QLineEdit()
@@ -196,7 +181,7 @@ class MainWindow(QMainWindow):
         search_row.addWidget(self.mod_search_edit, 1)
         search_row.addWidget(self.result_count_label)
         search_row.addWidget(self.mod_search_btn)
-        browse_layout.addLayout(search_row)
+        layout.addLayout(search_row)
 
         selection_row = QHBoxLayout()
         self.checked_count_label = QLabel("체크 0개")
@@ -213,7 +198,7 @@ class MainWindow(QMainWindow):
         selection_row.addWidget(self.clear_checks_btn)
         selection_row.addStretch(1)
         selection_row.addWidget(self.batch_download_btn)
-        browse_layout.addLayout(selection_row)
+        layout.addLayout(selection_row)
 
         splitter = QSplitter(Qt.Horizontal)
 
@@ -253,7 +238,7 @@ class MainWindow(QMainWindow):
 
         splitter.addWidget(right)
         splitter.setSizes([520, 780])
-        browse_layout.addWidget(splitter, 1)
+        layout.addWidget(splitter, 1)
 
         queue_title_row = QHBoxLayout()
         queue_title_row.addWidget(QLabel("다운로드 큐"))
@@ -273,104 +258,29 @@ class MainWindow(QMainWindow):
         queue_title_row.addWidget(self.retry_failed_btn)
         queue_title_row.addWidget(self.cancel_queue_btn)
         queue_title_row.addWidget(self.clear_queue_btn)
-        browse_layout.addLayout(queue_title_row)
+        layout.addLayout(queue_title_row)
 
         self.queue_tree = QTreeWidget()
         self.queue_tree.setHeaderLabels(["상태", "모드", "Workshop ID", "메시지"])
         self.queue_tree.setRootIsDecorated(False)
         self.queue_tree.setAlternatingRowColors(True)
-        self.queue_tree.setMaximumHeight(155)
+        self.queue_tree.setMaximumHeight(170)
         self.queue_tree.setColumnWidth(0, 110)
         self.queue_tree.setColumnWidth(1, 330)
         self.queue_tree.setColumnWidth(2, 130)
-        browse_layout.addWidget(self.queue_tree)
+        layout.addWidget(self.queue_tree)
 
         self.queue_progress = QProgressBar()
         self.queue_progress.setRange(0, 1)
         self.queue_progress.setValue(0)
         self.queue_progress.setFormat("대기열 없음")
-        browse_layout.addWidget(self.queue_progress)
+        layout.addWidget(self.queue_progress)
 
-        self.main_tabs.addTab(browse_tab, "Workshop 탐색")
-
-        # -------------------------------------------------------------
-        # 설치된 모드 관리 탭
-        # -------------------------------------------------------------
-        installed_tab = QWidget()
-        installed_layout = QVBoxLayout(installed_tab)
-
-        installed_toolbar = QHBoxLayout()
-        self.installed_count_label = QLabel("설치된 모드: 확인 전")
-        self.installed_refresh_btn = QPushButton("새로고침")
-        self.installed_refresh_btn.clicked.connect(self._scan_installed_mods)
-
-        self.installed_open_folder_btn = QPushButton("폴더 열기")
-        self.installed_open_folder_btn.clicked.connect(self._open_installed_mod_folder)
-        self.installed_open_workshop_btn = QPushButton("Workshop 열기")
-        self.installed_open_workshop_btn.clicked.connect(
-            self._open_installed_mod_workshop
-        )
-        self.installed_reinstall_btn = QPushButton("선택 재설치 / 업데이트")
-        self.installed_reinstall_btn.clicked.connect(
-            self._reinstall_selected_installed_mods
-        )
-        self.installed_update_all_btn = QPushButton("Workshop 모드 전체 업데이트")
-        self.installed_update_all_btn.clicked.connect(
-            self._update_all_installed_workshop_mods
-        )
-        self.installed_delete_btn = QPushButton("선택 삭제")
-        self.installed_delete_btn.clicked.connect(self._delete_selected_installed_mods)
-
-        installed_toolbar.addWidget(self.installed_count_label)
-        installed_toolbar.addStretch(1)
-        installed_toolbar.addWidget(self.installed_refresh_btn)
-        installed_toolbar.addWidget(self.installed_open_folder_btn)
-        installed_toolbar.addWidget(self.installed_open_workshop_btn)
-        installed_toolbar.addWidget(self.installed_reinstall_btn)
-        installed_toolbar.addWidget(self.installed_update_all_btn)
-        installed_toolbar.addWidget(self.installed_delete_btn)
-        installed_layout.addLayout(installed_toolbar)
-
-        self.installed_tree = QTreeWidget()
-        self.installed_tree.setHeaderLabels(
-            [
-                "상태",
-                "모드 이름",
-                "Workshop ID",
-                "Package ID",
-                "지원 버전",
-                "폴더",
-            ]
-        )
-        self.installed_tree.setRootIsDecorated(False)
-        self.installed_tree.setAlternatingRowColors(True)
-        self.installed_tree.setSelectionMode(QAbstractItemView.ExtendedSelection)
-        self.installed_tree.itemSelectionChanged.connect(
-            self._on_installed_selection_changed
-        )
-        self.installed_tree.setColumnWidth(0, 90)
-        self.installed_tree.setColumnWidth(1, 280)
-        self.installed_tree.setColumnWidth(2, 130)
-        self.installed_tree.setColumnWidth(3, 230)
-        self.installed_tree.setColumnWidth(4, 150)
-        installed_layout.addWidget(self.installed_tree, 1)
-
-        self.installed_detail = QPlainTextEdit()
-        self.installed_detail.setReadOnly(True)
-        self.installed_detail.setMaximumHeight(135)
-        self.installed_detail.setPlaceholderText(
-            "설치된 모드를 선택하면 로컬 메타데이터가 표시됩니다."
-        )
-        installed_layout.addWidget(self.installed_detail)
-
-        self.main_tabs.addTab(installed_tab, "설치된 모드 관리")
-
-        # 공통 로그 / 설정
         layout.addWidget(QLabel("로그"))
         self.log = QPlainTextEdit()
         self.log.setReadOnly(True)
         self.log.setMaximumBlockCount(5000)
-        self.log.setMaximumHeight(175)
+        self.log.setMaximumHeight(190)
         layout.addWidget(self.log)
 
         save_btn = QPushButton("현재 설정 저장")
@@ -1119,305 +1029,6 @@ class MainWindow(QMainWindow):
         self.batch_download_btn.setEnabled(
             (not running) and bool(self._checked_workshop_ids())
         )
-        if hasattr(self, "installed_tree"):
-            self._update_installed_action_buttons()
-
-    @Slot(int)
-    def _on_main_tab_changed(self, index: int) -> None:
-        if self.main_tabs.tabText(index) == "설치된 모드 관리":
-            self._scan_installed_mods()
-
-    def _scan_installed_mods(self) -> None:
-        mods_text = self.mods_edit.text().strip()
-        app_id = self._resolved_app_id()
-
-        if not mods_text:
-            self.installed_tree.clear()
-            self.installed_mods.clear()
-            self.installed_count_label.setText("설치된 모드: Mods 경로 없음")
-            return
-
-        mods_root = Path(mods_text)
-        self.installed_refresh_btn.setEnabled(False)
-        self.installed_count_label.setText("설치된 모드: 검색 중...")
-
-        worker = FunctionWorker(
-            fn=lambda: self.installed_mod_service.scan(mods_root, app_id)
-        )
-        worker.signals.succeeded.connect(self._on_installed_scan_success)
-        worker.signals.failed.connect(self._on_installed_scan_error)
-        self._start_worker(worker)
-
-    @Slot(object)
-    def _on_installed_scan_success(self, payload: object) -> None:
-        mods = list(payload) if isinstance(payload, list) else []
-        self.installed_tree.clear()
-        self.installed_mods.clear()
-
-        workshop_count = 0
-        invalid_count = 0
-
-        for mod in mods:
-            if not isinstance(mod, InstalledMod):
-                continue
-
-            key = str(mod.path)
-            self.installed_mods[key] = mod
-
-            if mod.workshop_id:
-                workshop_count += 1
-            if not mod.valid:
-                invalid_count += 1
-
-            status = "정상" if mod.valid else "경고"
-            if mod.workshop_id:
-                status += " / Workshop"
-
-            row = QTreeWidgetItem(
-                [
-                    status,
-                    mod.name,
-                    mod.workshop_id or "-",
-                    mod.package_id or "-",
-                    mod.versions_text,
-                    mod.folder_name,
-                ]
-            )
-            row.setData(0, Qt.UserRole, key)
-            if not mod.valid:
-                row.setToolTip(0, mod.message)
-                row.setToolTip(1, mod.message)
-            self.installed_tree.addTopLevelItem(row)
-
-        self.installed_refresh_btn.setEnabled(True)
-        self.installed_count_label.setText(
-            f"설치된 모드: {len(self.installed_mods)}개 / "
-            f"Workshop {workshop_count}개 / 경고 {invalid_count}개"
-        )
-        self._update_installed_action_buttons()
-        self._log(
-            "INFO",
-            f"설치된 모드 스캔 완료: {len(self.installed_mods)}개 "
-            f"(Workshop {workshop_count} / 경고 {invalid_count})",
-        )
-
-    @Slot(str)
-    def _on_installed_scan_error(self, message: str) -> None:
-        self.installed_refresh_btn.setEnabled(True)
-        self.installed_count_label.setText("설치된 모드: 스캔 실패")
-        self._log("ERROR", f"설치된 모드 스캔 실패: {message}")
-
-    def _selected_installed_mods(self) -> list[InstalledMod]:
-        result: list[InstalledMod] = []
-        for row in self.installed_tree.selectedItems():
-            key = str(row.data(0, Qt.UserRole) or "")
-            mod = self.installed_mods.get(key)
-            if mod is not None:
-                result.append(mod)
-        return result
-
-    def _on_installed_selection_changed(self) -> None:
-        selected = self._selected_installed_mods()
-        self._update_installed_action_buttons()
-
-        if len(selected) != 1:
-            if not selected:
-                self.installed_detail.clear()
-            else:
-                self.installed_detail.setPlainText(
-                    f"{len(selected)}개 모드를 선택했습니다."
-                )
-            return
-
-        mod = selected[0]
-        detail_lines = [
-            mod.name,
-            "",
-            f"폴더: {mod.path}",
-            f"Workshop ID: {mod.workshop_id or '-'}",
-            f"Package ID: {mod.package_id or '-'}",
-            f"저작자: {mod.author or '-'}",
-            f"지원 버전: {mod.versions_text}",
-            f"로컬 검증: {'정상' if mod.valid else '경고'}",
-            f"메시지: {mod.message or '-'}",
-        ]
-        self.installed_detail.setPlainText("\n".join(detail_lines))
-
-    def _update_installed_action_buttons(self) -> None:
-        selected = self._selected_installed_mods()
-        one = len(selected) == 1
-        has_workshop = bool(selected) and all(mod.workshop_id for mod in selected)
-
-        self.installed_open_folder_btn.setEnabled(one)
-        self.installed_open_workshop_btn.setEnabled(
-            one and bool(selected[0].workshop_id)
-        )
-        self.installed_reinstall_btn.setEnabled(
-            has_workshop and not self._queue_running
-        )
-        self.installed_delete_btn.setEnabled(
-            bool(selected) and not self._queue_running
-        )
-
-        any_workshop = any(
-            mod.workshop_id for mod in self.installed_mods.values()
-        )
-        self.installed_update_all_btn.setEnabled(
-            any_workshop and not self._queue_running
-        )
-
-    def _open_installed_mod_folder(self) -> None:
-        selected = self._selected_installed_mods()
-        if len(selected) != 1:
-            return
-        QDesktopServices.openUrl(QUrl.fromLocalFile(str(selected[0].path)))
-
-    def _open_installed_mod_workshop(self) -> None:
-        selected = self._selected_installed_mods()
-        if len(selected) != 1 or not selected[0].workshop_url:
-            return
-        QDesktopServices.openUrl(QUrl(selected[0].workshop_url))
-
-    def _reinstall_selected_installed_mods(self) -> None:
-        selected = [
-            mod for mod in self._selected_installed_mods()
-            if mod.workshop_id
-        ]
-        if not selected:
-            QMessageBox.information(
-                self,
-                "설치된 모드",
-                "Workshop ID가 확인되는 모드를 선택해 주세요.",
-            )
-            return
-        self._enqueue_installed_mod_updates(selected)
-
-    def _update_all_installed_workshop_mods(self) -> None:
-        mods = [
-            mod for mod in self.installed_mods.values()
-            if mod.workshop_id
-        ]
-        if not mods:
-            QMessageBox.information(
-                self,
-                "전체 업데이트",
-                "Workshop ID를 가진 설치 모드가 없습니다.",
-            )
-            return
-
-        answer = QMessageBox.question(
-            self,
-            "설치된 Workshop 모드 전체 업데이트",
-            f"{len(mods)}개 Workshop 모드를 SteamCMD로 다시 내려받아 "
-            "최신 파일로 교체할까요?",
-        )
-        if answer != QMessageBox.Yes:
-            return
-
-        self._enqueue_installed_mod_updates(mods)
-
-    def _enqueue_installed_mod_updates(
-        self,
-        mods: list[InstalledMod],
-    ) -> None:
-        app_id = self._resolved_app_id()
-        mods_root = self.mods_edit.text().strip()
-        if not app_id or not mods_root:
-            QMessageBox.warning(
-                self,
-                "모드 업데이트",
-                "App ID와 Mods 경로를 먼저 확인해 주세요.",
-            )
-            return
-
-        context: dict[str, object] = {
-            "app_id": app_id,
-            "mods_root": mods_root,
-            "auth_mode": self._current_auth_mode(),
-            "username": self.steam_username_edit.text().strip(),
-            "items": [
-                (mod.workshop_id, mod.name)
-                for mod in mods
-                if mod.workshop_id
-            ],
-        }
-
-        resolved = self.steamcmd_manager.resolve(
-            str(self.settings.get("steamcmd_path", "") or "")
-        )
-        if resolved is None:
-            answer = QMessageBox.question(
-                self,
-                "SteamCMD 자동 설치",
-                "SteamCMD가 준비되어 있지 않습니다.\n"
-                "WorkshopPilot 관리 영역에 자동 설치할까요?",
-            )
-            if answer != QMessageBox.Yes:
-                return
-            self._pending_batch_context = context
-            self._install_managed_steamcmd()
-            return
-
-        self.main_tabs.setCurrentIndex(0)
-        self._enqueue_batch_context(context)
-
-    def _delete_selected_installed_mods(self) -> None:
-        selected = self._selected_installed_mods()
-        if not selected:
-            return
-
-        names = "\n".join(
-            f"- {mod.name} ({mod.folder_name})"
-            for mod in selected[:12]
-        )
-        if len(selected) > 12:
-            names += f"\n... 외 {len(selected) - 12}개"
-
-        answer = QMessageBox.warning(
-            self,
-            "설치된 모드 삭제",
-            f"다음 {len(selected)}개 모드 폴더를 실제로 삭제합니다.\n\n"
-            f"{names}\n\n"
-            "계속할까요?",
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No,
-        )
-        if answer != QMessageBox.Yes:
-            return
-
-        mods_root = Path(self.mods_edit.text().strip())
-        paths = [mod.path for mod in selected]
-
-        def delete_many() -> list[str]:
-            deleted: list[str] = []
-            for path in paths:
-                self.installed_mod_service.delete(mods_root, path)
-                deleted.append(str(path))
-            return deleted
-
-        self.installed_delete_btn.setEnabled(False)
-        worker = FunctionWorker(fn=delete_many)
-        worker.signals.succeeded.connect(self._on_installed_delete_success)
-        worker.signals.failed.connect(self._on_installed_delete_error)
-        self._start_worker(worker)
-
-    @Slot(object)
-    def _on_installed_delete_success(self, payload: object) -> None:
-        deleted = list(payload) if isinstance(payload, list) else []
-        self._log("INFO", f"설치된 모드 삭제 완료: {len(deleted)}개")
-        self._scan_installed_mods()
-
-        # 검색 결과의 설치됨 상태도 즉시 다시 계산.
-        mods_root = Path(self.mods_edit.text().strip())
-        for workshop_id, item in self.workshop_items.items():
-            item.installed = (mods_root / workshop_id).is_dir()
-            self._refresh_list_item(workshop_id)
-
-    @Slot(str)
-    def _on_installed_delete_error(self, message: str) -> None:
-        self._log("ERROR", f"설치된 모드 삭제 실패: {message}")
-        QMessageBox.warning(self, "모드 삭제 실패", message)
-        self._scan_installed_mods()
 
     def _on_auth_mode_changed(self, *_args: object) -> None:
         mode = self._current_auth_mode()
@@ -1621,9 +1232,6 @@ class MainWindow(QMainWindow):
         self._active_download_app_id = ""
         self._active_mods_root = ""
         self._update_queue_summary()
-
-        if hasattr(self, "installed_tree"):
-            self._scan_installed_mods()
 
         if self._queue_cancel_requested:
             self._finish_queue()
