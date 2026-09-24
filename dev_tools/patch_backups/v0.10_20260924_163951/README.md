@@ -156,17 +156,6 @@ Package ID 중복
 v0.8은 안전을 위해 `ModsConfig.xml`을 자동 수정하지 않습니다.
 로드 순서 변경은 다음 단계에서 백업 + 사용자 승인 구조로 추가할 예정입니다.
 
-
-## v0.10 Crimson Desert / Nexus 로컬 모드
-
-v0.10은 v0.8 기반이며 v0.9 RimWorld 자동 로드순서 적용은 포함하지 않습니다.
-
-`Nexus / 로컬 모드` 탭에서 아카이브를 분석하고 CDUMM의 headless worker로 `snapshot -> import -> apply`를 수행합니다.
-
-관리형 CDUMM: `%LOCALAPPDATA%\WorkshopPilot\tools\cdumm\CDUMM3.exe`
-
-게임이 Program Files 아래여서 쓰기 권한 문제가 생기면 관리자 실행보다 Steam 라이브러리를 비보호 경로로 옮기는 방법을 권장합니다.
-
 ## 빠른 시작
 
 1. `SETUP_VENV.bat`

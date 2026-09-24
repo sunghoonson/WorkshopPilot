@@ -33,12 +33,6 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from app.core.cdumm_bridge import CdummBridge
-from app.core.cdumm_manager import CdummManager
-from app.core.crimson_desert_archive import (
-    CrimsonArchiveAnalysis,
-    CrimsonDesertArchiveAnalyzer,
-)
 from app.core.install_metadata_service import InstallMetadataService
 from app.core.installed_mod_service import InstalledModService
 from app.core.installer import install_mod_folder
@@ -96,9 +90,6 @@ class MainWindow(QMainWindow):
 
         self.settings = load_settings()
         self.app_service = SteamAppService()
-        self.crimson_archive_analyzer = CrimsonDesertArchiveAnalyzer()
-        self.cdumm_manager = CdummManager()
-        self.cdumm_bridge = CdummBridge()
         self.workshop_service = WorkshopService()
         self.install_metadata_service = InstallMetadataService()
         self.installed_mod_service = InstalledModService(
@@ -114,8 +105,6 @@ class MainWindow(QMainWindow):
         self.workshop_items: dict[str, WorkshopItem] = {}
         self.installed_mods: dict[str, InstalledMod] = {}
         self.rimworld_diagnostic_report: RimWorldDiagnosticReport | None = None
-        self.crimson_archive_analysis: CrimsonArchiveAnalysis | None = None
-        self._crimson_install_running = False
         self.pixmap_cache: dict[str, QPixmap] = {}
         self._thumbnail_generation = 0
         self._active_workers: set[FunctionWorker] = set()
@@ -474,82 +463,6 @@ class MainWindow(QMainWindow):
 
         self.main_tabs.addTab(diagnostic_tab, "RimWorld 진단")
 
-        # Nexus / local archive - Crimson Desert
-        nexus_tab = QWidget()
-        nexus_layout = QVBoxLayout(nexus_tab)
-        intro = QLabel(
-            "Crimson Desert Nexus/로컬 모드: 아카이브를 먼저 분석한 뒤 "
-            "CDUMM의 snapshot/import/apply 엔진으로 적용합니다."
-        )
-        intro.setWordWrap(True)
-        nexus_layout.addWidget(intro)
-
-        game_path_row = QHBoxLayout()
-        game_path_row.addWidget(QLabel("Crimson Desert 게임 경로"))
-        self.crimson_game_edit = QLineEdit()
-        self.crimson_game_browse_btn = QPushButton("찾기")
-        self.crimson_game_browse_btn.clicked.connect(self._pick_crimson_desert_game_root)
-        self.crimson_game_validate_btn = QPushButton("구조 확인")
-        self.crimson_game_validate_btn.clicked.connect(self._validate_crimson_desert_game_root)
-        game_path_row.addWidget(self.crimson_game_edit, 1)
-        game_path_row.addWidget(self.crimson_game_browse_btn)
-        game_path_row.addWidget(self.crimson_game_validate_btn)
-        nexus_layout.addLayout(game_path_row)
-
-        archive_row = QHBoxLayout()
-        archive_row.addWidget(QLabel("모드 아카이브"))
-        self.crimson_archive_edit = QLineEdit()
-        self.crimson_archive_edit.setPlaceholderText("Nexus에서 받은 .zip / .7z / .rar / .json / .cdmod 등")
-        self.crimson_archive_browse_btn = QPushButton("파일 선택")
-        self.crimson_archive_browse_btn.clicked.connect(self._pick_crimson_mod_archive)
-        self.crimson_archive_analyze_btn = QPushButton("분석")
-        self.crimson_archive_analyze_btn.clicked.connect(self._analyze_crimson_mod_archive)
-        archive_row.addWidget(self.crimson_archive_edit, 1)
-        archive_row.addWidget(self.crimson_archive_browse_btn)
-        archive_row.addWidget(self.crimson_archive_analyze_btn)
-        nexus_layout.addLayout(archive_row)
-
-        cdumm_row = QHBoxLayout()
-        cdumm_row.addWidget(QLabel("Crimson Desert 도구"))
-        self.cdumm_status_label = QLabel("확인 중...")
-        self.cdumm_install_btn = QPushButton("CDUMM 설치/업데이트")
-        self.cdumm_install_btn.clicked.connect(self._install_managed_cdumm)
-        self.cdumm_external_btn = QPushButton("외부 CDUMM 선택")
-        self.cdumm_external_btn.clicked.connect(self._pick_external_cdumm)
-        self.cdumm_open_btn = QPushButton("CDUMM 열기")
-        self.cdumm_open_btn.clicked.connect(self._open_cdumm_gui)
-        cdumm_row.addWidget(self.cdumm_status_label, 1)
-        cdumm_row.addWidget(self.cdumm_install_btn)
-        cdumm_row.addWidget(self.cdumm_external_btn)
-        cdumm_row.addWidget(self.cdumm_open_btn)
-        nexus_layout.addLayout(cdumm_row)
-
-        self.crimson_analysis_detail = QPlainTextEdit()
-        self.crimson_analysis_detail.setReadOnly(True)
-        self.crimson_analysis_detail.setPlaceholderText("manifest, 파일 구성, 위험 요소와 설치 방식을 표시합니다.")
-        nexus_layout.addWidget(self.crimson_analysis_detail, 1)
-
-        actions = QHBoxLayout()
-        self.crimson_progress_label = QLabel("대기")
-        self.crimson_cdmods_open_btn = QPushButton("CDMods 폴더 열기")
-        self.crimson_cdmods_open_btn.clicked.connect(self._open_crimson_cdmods_folder)
-        self.crimson_install_btn = QPushButton("안전 설치 (CDUMM)")
-        self.crimson_install_btn.setEnabled(False)
-        self.crimson_install_btn.clicked.connect(self._install_crimson_archive_with_cdumm)
-        actions.addWidget(self.crimson_progress_label, 1)
-        actions.addWidget(self.crimson_cdmods_open_btn)
-        actions.addWidget(self.crimson_install_btn)
-        nexus_layout.addLayout(actions)
-
-        warning = QLabel(
-            "주의: 게임이 Program Files 아래에 있으면 Windows 권한 때문에 CDMods/overlay 쓰기가 실패할 수 있습니다. "
-            "문제가 나면 관리자 실행보다 Steam 라이브러리를 C:\\Games 같은 비보호 경로로 옮기는 방법을 권장합니다."
-        )
-        warning.setWordWrap(True)
-        warning.setStyleSheet("QLabel { color: #b06b00; }")
-        nexus_layout.addWidget(warning)
-        self.main_tabs.addTab(nexus_tab, "Nexus / 로컬 모드")
-
         # 공통 로그 / 설정
         layout.addWidget(QLabel("로그"))
         self.log = QPlainTextEdit()
@@ -597,13 +510,6 @@ class MainWindow(QMainWindow):
         self._on_auth_mode_changed()
 
         self._refresh_steam_tool_status()
-        self.crimson_game_edit.setText(
-            str(self.settings.get(
-                "crimson_desert_game_path",
-                r"C:\Program Files (x86)\Steam\steamapps\common\Crimson Desert",
-            ) or "")
-        )
-        self._refresh_cdumm_status()
         self._log("INFO", "초기 설정을 불러왔습니다.")
 
     def _refresh_steam_tool_status(self) -> None:
@@ -721,188 +627,9 @@ class MainWindow(QMainWindow):
         self.settings["steamcmd_mode"] = "managed_preferred"
         self.settings["steam_auth_mode"] = self._current_auth_mode()
         self.settings["steam_username"] = self.steam_username_edit.text().strip()
-        self.settings["crimson_desert_game_path"] = self.crimson_game_edit.text().strip()
         # Password / Steam Guard values are intentionally never persisted.
         save_settings(self.settings)
         self._log("INFO", "config/user_settings.json 에 설정을 저장했습니다.")
-
-    def _refresh_cdumm_status(self) -> None:
-        resolved = self.cdumm_manager.resolve(str(self.settings.get("cdumm_path", "") or ""))
-        if resolved is None:
-            self.cdumm_status_label.setText("○ CDUMM 미설치 — 관리형 자동 설치 가능")
-            self.cdumm_status_label.setToolTip(f"관리형 위치: {self.cdumm_manager.managed_root}")
-            self.cdumm_open_btn.setEnabled(False)
-        else:
-            mode, path = resolved
-            self.cdumm_status_label.setText(f"● CDUMM 준비됨 ({'관리형' if mode == 'managed' else '외부'})")
-            self.cdumm_status_label.setToolTip(str(path))
-            self.cdumm_open_btn.setEnabled(True)
-        self._update_crimson_install_button()
-
-    def _pick_crimson_desert_game_root(self) -> None:
-        path = QFileDialog.getExistingDirectory(self, "Crimson Desert 게임 폴더 선택", self.crimson_game_edit.text().strip())
-        if not path: return
-        self.crimson_game_edit.setText(path)
-        self.settings["crimson_desert_game_path"] = path
-        save_settings(self.settings)
-        self._validate_crimson_desert_game_root()
-
-    def _validate_crimson_desert_game_root(self) -> None:
-        root = Path(self.crimson_game_edit.text().strip())
-        ok, message = self.crimson_archive_analyzer.validate_game_root(root)
-        self.crimson_progress_label.setText("게임 구조 정상" if ok else "게임 구조 확인 필요")
-        self._log("INFO" if ok else "ERROR", f"[Crimson Desert] {message}")
-        if not ok: QMessageBox.warning(self, "Crimson Desert 경로", message)
-        self._update_crimson_install_button()
-
-    def _pick_crimson_mod_archive(self) -> None:
-        current = self.crimson_archive_edit.text().strip()
-        start = str(Path(current).parent) if current else ""
-        path, _ = QFileDialog.getOpenFileName(self, "Crimson Desert 모드 파일 선택", start, "모드 파일 (*.zip *.7z *.rar *.json *.cdmod *.asi *.dds);;모든 파일 (*)")
-        if not path: return
-        self.crimson_archive_edit.setText(path)
-        self.crimson_archive_analysis = None
-        self._analyze_crimson_mod_archive()
-
-    def _analyze_crimson_mod_archive(self) -> None:
-        text = self.crimson_archive_edit.text().strip()
-        if not text: return
-        self.crimson_archive_analyze_btn.setEnabled(False)
-        self.crimson_analysis_detail.setPlainText("아카이브 분석 중...")
-        self.crimson_progress_label.setText("분석 중...")
-        worker = FunctionWorker(fn=lambda: self.crimson_archive_analyzer.analyze(Path(text)))
-        worker.signals.succeeded.connect(self._on_crimson_archive_analysis_success)
-        worker.signals.failed.connect(self._on_crimson_archive_analysis_error)
-        self._start_worker(worker)
-
-    @Slot(object)
-    def _on_crimson_archive_analysis_success(self, payload: object) -> None:
-        self.crimson_archive_analyze_btn.setEnabled(True)
-        if not isinstance(payload, CrimsonArchiveAnalysis):
-            self._on_crimson_archive_analysis_error("아카이브 분석 결과 형식이 올바르지 않습니다."); return
-        self.crimson_archive_analysis = payload
-        self.crimson_analysis_detail.setPlainText(payload.to_display_text())
-        self.crimson_progress_label.setText(f"분석 완료: {payload.format_id}")
-        self._log("INFO", f"[Crimson Desert] 모드 분석 완료: {payload.title} / format={payload.format_id} / nexus={payload.nexus_mod_id or '-'}")
-        self._update_crimson_install_button()
-
-    @Slot(str)
-    def _on_crimson_archive_analysis_error(self, message: str) -> None:
-        self.crimson_archive_analyze_btn.setEnabled(True)
-        self.crimson_archive_analysis = None
-        self.crimson_analysis_detail.setPlainText(message)
-        self.crimson_progress_label.setText("분석 실패")
-        self._log("ERROR", f"[Crimson Desert] 분석 실패: {message}")
-        self._update_crimson_install_button()
-
-    def _pick_external_cdumm(self) -> None:
-        current = str(self.settings.get("cdumm_path", "") or "")
-        path, _ = QFileDialog.getOpenFileName(self, "외부 CDUMM3.exe 선택", str(Path(current).parent) if current else "", "CDUMM (CDUMM3.exe CDUMM.exe);;실행 파일 (*.exe);;모든 파일 (*)")
-        if not path: return
-        try: status = self.cdumm_manager.self_check(Path(path))
-        except Exception as exc:
-            QMessageBox.warning(self, "CDUMM 확인 실패", f"{type(exc).__name__}: {exc}"); return
-        if not status.get("ok", False):
-            QMessageBox.warning(self, "CDUMM 확인 실패", "선택한 실행 파일의 self-check가 통과하지 못했습니다."); return
-        self.settings["cdumm_path"] = path
-        save_settings(self.settings)
-        self._refresh_cdumm_status()
-        self._log("INFO", f"외부 CDUMM 경로 저장: {path}")
-
-    def _install_managed_cdumm(self) -> None:
-        if self._crimson_install_running: return
-        self.cdumm_install_btn.setEnabled(False); self.cdumm_external_btn.setEnabled(False)
-        self.cdumm_status_label.setText("◉ CDUMM 설치/업데이트 중...")
-        self._log("INFO", "[Crimson Desert] 관리형 CDUMM 설치/업데이트 시작")
-        worker = FunctionWorker(progress_fn=lambda emit: self.cdumm_manager.install_or_update(emit))
-        worker.signals.progress.connect(lambda text: self._log("INFO", f"[CDUMM] {text}"))
-        worker.signals.succeeded.connect(self._on_cdumm_install_success)
-        worker.signals.failed.connect(self._on_cdumm_install_error)
-        self._start_worker(worker)
-
-    @Slot(object)
-    def _on_cdumm_install_success(self, payload: object) -> None:
-        self.cdumm_install_btn.setEnabled(True); self.cdumm_external_btn.setEnabled(True)
-        self._refresh_cdumm_status(); self._log("INFO", f"관리형 CDUMM 준비 완료: {payload}")
-
-    @Slot(str)
-    def _on_cdumm_install_error(self, message: str) -> None:
-        self.cdumm_install_btn.setEnabled(True); self.cdumm_external_btn.setEnabled(True)
-        self._refresh_cdumm_status(); self._log("ERROR", f"CDUMM 설치/업데이트 실패: {message}")
-        QMessageBox.warning(self, "CDUMM 설치 실패", message)
-
-    def _open_cdumm_gui(self) -> None:
-        resolved = self.cdumm_manager.resolve(str(self.settings.get("cdumm_path", "") or ""))
-        if resolved is None:
-            QMessageBox.information(self, "CDUMM", "CDUMM을 먼저 설치하거나 외부 실행 파일을 선택해 주세요."); return
-        _, exe = resolved
-        try:
-            import subprocess
-            subprocess.Popen([str(exe)], cwd=str(exe.parent))
-        except Exception as exc: QMessageBox.warning(self, "CDUMM 실행 실패", f"{type(exc).__name__}: {exc}")
-
-    def _open_crimson_cdmods_folder(self) -> None:
-        root = Path(self.crimson_game_edit.text().strip())
-        target = self.cdumm_bridge.paths_for(root)["cdmods"]
-        try: target.mkdir(parents=True, exist_ok=True)
-        except OSError: pass
-        QDesktopServices.openUrl(QUrl.fromLocalFile(str(target)))
-
-    def _update_crimson_install_button(self) -> None:
-        analysis = self.crimson_archive_analysis
-        resolved = self.cdumm_manager.resolve(str(self.settings.get("cdumm_path", "") or ""))
-        game_ok = False
-        text = self.crimson_game_edit.text().strip()
-        if text: game_ok, _ = self.crimson_archive_analyzer.validate_game_root(Path(text))
-        self.crimson_install_btn.setEnabled(bool(analysis and analysis.can_install_with_cdumm and resolved and game_ok and not self._crimson_install_running))
-
-    def _install_crimson_archive_with_cdumm(self) -> None:
-        analysis = self.crimson_archive_analysis
-        if analysis is None: return
-        root = Path(self.crimson_game_edit.text().strip())
-        ok, message = self.crimson_archive_analyzer.validate_game_root(root)
-        if not ok: QMessageBox.warning(self, "Crimson Desert 경로", message); return
-        resolved = self.cdumm_manager.resolve(str(self.settings.get("cdumm_path", "") or ""))
-        if resolved is None: QMessageBox.information(self, "CDUMM", "먼저 CDUMM을 설치해 주세요."); return
-        if analysis.risk_flags:
-            details = "\n".join(f"- {x}" for x in analysis.risk_flags)
-            answer = QMessageBox.warning(self, "실행 코드 포함 가능성", f"아카이브에서 다음 위험 요소를 감지했습니다.\n\n{details}\n\nv0.10은 설치 스크립트를 자동 승인하지 않습니다. 그래도 CDUMM import를 시도할까요?", QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
-            if answer != QMessageBox.Yes: return
-        lower = str(root).lower()
-        protected = "\\program files\\" in lower or "\\program files (x86)\\" in lower
-        note = "\n\n현재 게임이 Program Files 아래에 있어 쓰기 권한 문제가 발생할 수 있습니다." if protected else ""
-        answer = QMessageBox.question(self, "Crimson Desert 모드 안전 설치", f"CDUMM 엔진으로 다음 모드를 적용합니다.\n\n{analysis.title}\n{analysis.archive_path}\n\n최초 적용이면 vanilla snapshot 생성 때문에 시간이 걸릴 수 있습니다.{note}\n\n계속할까요?")
-        if answer != QMessageBox.Yes: return
-        _, exe = resolved
-        self._crimson_install_running = True
-        self.crimson_install_btn.setEnabled(False); self.cdumm_install_btn.setEnabled(False); self.cdumm_external_btn.setEnabled(False)
-        self.crimson_progress_label.setText("CDUMM 작업 중...")
-        self._log("INFO", f"[Crimson Desert] CDUMM 설치 시작: {analysis.archive_path}")
-        worker = FunctionWorker(progress_fn=lambda emit: self.cdumm_bridge.install_archive(exe, root, analysis.archive_path, emit))
-        worker.signals.progress.connect(self._on_crimson_worker_progress)
-        worker.signals.succeeded.connect(self._on_crimson_install_success)
-        worker.signals.failed.connect(self._on_crimson_install_error)
-        self._start_worker(worker)
-
-    @Slot(str)
-    def _on_crimson_worker_progress(self, text: str) -> None:
-        self.crimson_progress_label.setText(text[-120:]); self._log("CDUMM", text)
-
-    @Slot(object)
-    def _on_crimson_install_success(self, payload: object) -> None:
-        self._crimson_install_running = False
-        self.cdumm_install_btn.setEnabled(True); self.cdumm_external_btn.setEnabled(True)
-        self.crimson_progress_label.setText("적용 완료"); self._update_crimson_install_button()
-        self._log("INFO", f"[Crimson Desert] 모드 적용 완료: {payload}")
-        QMessageBox.information(self, "Crimson Desert 모드 적용 완료", "CDUMM import/apply가 완료되었습니다.\n\n게임을 실행해 반영 여부를 확인해 주세요.\n비활성화/제거/충돌 관리는 현재 'CDUMM 열기'에서 할 수 있습니다.")
-
-    @Slot(str)
-    def _on_crimson_install_error(self, message: str) -> None:
-        self._crimson_install_running = False
-        self.cdumm_install_btn.setEnabled(True); self.cdumm_external_btn.setEnabled(True)
-        self.crimson_progress_label.setText("적용 실패"); self._update_crimson_install_button()
-        self._log("ERROR", f"[Crimson Desert] 모드 적용 실패: {message}")
-        QMessageBox.warning(self, "Crimson Desert 모드 적용 실패", message)
 
     def _search_game(self) -> None:
         query = self.game_edit.text().strip()

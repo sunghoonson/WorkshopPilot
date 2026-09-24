@@ -1,15 +1,5 @@
 # Changelog
 
-## v0.10 - Crimson Desert / Nexus local archive bridge
-
-- v0.9를 포함하지 않고 v0.8에서 분기
-- Nexus / 로컬 모드 탭
-- Crimson Browser manifest 분석
-- 관리형 CDUMM 설치/업데이트
-- CDUMM snapshot -> import -> apply 연동
-- 설치 스크립트 자동 승인 금지
-- Program Files 권한 경고
-
 ## v0.8 - RimWorld dependency / load-order diagnostics
 
 - RimWorld About.xml의 `modDependencies` 파싱
