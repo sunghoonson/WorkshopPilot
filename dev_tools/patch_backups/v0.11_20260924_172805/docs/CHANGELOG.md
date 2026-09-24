@@ -1,21 +1,5 @@
 # Changelog
 
-## v0.11 - DMM bridge / multi-variant detection
-
-- v0.10 기반
-- DMM Nexus 다운로드 페이지 바로 열기
-- 사용자가 받은 `DMM.exe` 또는 DMM ZIP을 관리형 경로로 가져오기
-- 관리형 경로: `%LOCALAPPDATA%\WorkshopPilot\tools\dmm\DMM.exe`
-- DMM 실행 버튼
-- 현재 선택 모드 파일을 Explorer에서 바로 찾기
-- Character Creator 같은 multi-variant ZIP 자동 감지
-- Variant 목록 표시
-- multi-variant는 `권장 설치기: DMM`
-- multi-variant에서 CDUMM headless 자동 설치 비활성화
-- `mod.json` 메타데이터 분석
-- DMM/CDUMM 동시 적용 경고
-- Nexus 인증/다운로드 제한은 우회하지 않음
-
 ## v0.10 - Crimson Desert / Nexus local archive bridge
 
 - v0.9를 포함하지 않고 v0.8에서 분기

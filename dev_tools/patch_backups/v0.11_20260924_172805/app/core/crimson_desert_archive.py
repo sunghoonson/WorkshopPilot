@@ -24,20 +24,13 @@ class CrimsonArchiveAnalysis:
     risk_flags: tuple[str, ...] = ()
     notes: tuple[str, ...] = ()
     manifest: dict = field(default_factory=dict)
-    recommended_manager: str = "cdumm"
-    requires_variant_choice: bool = False
-    variant_options: tuple[str, ...] = ()
 
     @property
     def can_install_with_cdumm(self) -> bool:
-        return (
-            self.valid_archive
-            and not self.requires_variant_choice
-            and self.format_id in {
-                "crimson_browser_mod_v1",
-                "cdumm_supported_archive",
-            }
-        )
+        return self.valid_archive and self.format_id in {
+            "crimson_browser_mod_v1",
+            "cdumm_supported_archive",
+        }
 
     @property
     def size_text(self) -> str:
@@ -61,15 +54,7 @@ class CrimsonArchiveAnalysis:
             f"압축 해제 기준 크기: {self.size_text}",
             f"루트 폴더: {self.root_prefix or '(없음)'}",
             f"확장자: {', '.join(self.extensions) or '-'}",
-            f"권장 설치기: {self.recommended_manager.upper()}",
-            f"옵션 선택 필요: {'예' if self.requires_variant_choice else '아니오'}",
         ]
-        if self.variant_options:
-            lines.extend([
-                "",
-                "감지된 Variant:",
-                *[f"- {x}" for x in self.variant_options],
-            ])
         if self.description:
             lines += ["", "설명:", self.description]
         if self.risk_flags:
@@ -133,17 +118,6 @@ class CrimsonDesertArchiveAnalyzer:
                 names = [x.filename.replace("\\", "/") for x in infos]
                 exts = tuple(sorted({Path(n).suffix.lower() for n in names if Path(n).suffix}))
                 root_prefix = self._common_root_prefix(names)
-                variant_options = self._find_structural_variants(names, root_prefix)
-                requires_variant_choice = len(variant_options) >= 2
-
-                mod_info_name = self._find_mod_info_name(names)
-                mod_info = {}
-                if mod_info_name:
-                    try:
-                        mod_info = json.loads(zf.read(mod_info_name).decode("utf-8-sig"))
-                    except (json.JSONDecodeError, UnicodeDecodeError):
-                        mod_info = {}
-
                 manifest_name = self._find_manifest_name(names)
                 manifest = {}
                 if manifest_name:
@@ -155,34 +129,11 @@ class CrimsonDesertArchiveAnalyzer:
                 author = str(manifest.get("author", "") or "").strip()
                 version = str(manifest.get("version", "") or "").strip()
                 description = str(manifest.get("description", "") or "").strip()
-
-                if isinstance(mod_info, dict):
-                    info = mod_info.get("modinfo")
-                    if isinstance(info, dict):
-                        title = title or str(info.get("title", "") or info.get("name", "") or "").strip()
-                        author = author or str(info.get("author", "") or "").strip()
-                        version = version or str(info.get("version", "") or "").strip()
-                        description = description or str(info.get("description", "") or "").strip()
-
-                recommended_manager = "dmm" if requires_variant_choice else "cdumm"
                 risk = []
                 executable_exts = [e for e in exts if e in self.SCRIPT_EXTENSIONS]
                 if executable_exts:
                     risk.append("실행 코드 유형이 포함되어 있습니다: " + ", ".join(executable_exts))
                 notes = []
-                if requires_variant_choice:
-                    fmt = "multi_variant_archive"
-                    notes.append(
-                        "여러 캐릭터/바디 Variant 폴더를 감지했습니다."
-                    )
-                    notes.append(
-                        "DMM의 variant dropdown에서 옵션을 고른 뒤 Mount하는 방식을 권장합니다."
-                    )
-                    if ".asi" in exts:
-                        notes.append(
-                            "ASI 플러그인도 포함되어 있어 DMM에서 ASI 활성 상태를 함께 확인해야 합니다."
-                        )
-
                 if fmt == "crimson_browser_mod_v1":
                     prefix = f"{root_prefix}/files/" if root_prefix else "files/"
                     if any(n.startswith(prefix) for n in names):
@@ -195,8 +146,6 @@ class CrimsonDesertArchiveAnalyzer:
                         "manifest.json은 있지만 알려진 Crimson Browser format이 아닙니다: "
                         + (fmt or "(format 없음)")
                     )
-                elif requires_variant_choice:
-                    pass
                 else:
                     known = any(e in {".json", ".paz", ".pamt", ".dds", ".asi", ".bnk", ".bsdiff", ".xdelta", ".cdmod"} for e in exts)
                     if known:
@@ -220,9 +169,6 @@ class CrimsonDesertArchiveAnalyzer:
                     risk_flags=tuple(risk),
                     notes=tuple(notes),
                     manifest=manifest,
-                    recommended_manager=recommended_manager,
-                    requires_variant_choice=requires_variant_choice,
-                    variant_options=tuple(variant_options),
                 )
         except zipfile.BadZipFile as exc:
             raise RuntimeError(f"손상되었거나 ZIP이 아닌 파일입니다: {exc}") from exc
@@ -230,44 +176,6 @@ class CrimsonDesertArchiveAnalyzer:
             raise RuntimeError(
                 f"manifest.json JSON 파싱 실패: line {exc.lineno}, column {exc.colno}: {exc.msg}"
             ) from exc
-
-
-    @staticmethod
-    def _find_mod_info_name(names: list[str]) -> str:
-        matches = [
-            n for n in names
-            if n.lower() == "mod.json" or n.lower().endswith("/mod.json")
-        ]
-        matches.sort(key=lambda n: (n.count("/"), len(n)))
-        return matches[0] if matches else ""
-
-    @staticmethod
-    def _find_structural_variants(
-        names: list[str],
-        root_prefix: str,
-    ) -> list[str]:
-        prefix = f"{root_prefix}/" if root_prefix else ""
-        options: set[str] = set()
-
-        for name in names:
-            if prefix and not name.startswith(prefix):
-                continue
-
-            rel = name[len(prefix):] if prefix else name
-            parts = [part for part in rel.split("/") if part]
-            if len(parts) < 3:
-                continue
-
-            option = parts[0]
-            if option.lower() in {"meta", "files"}:
-                continue
-            if option.isdigit() and len(option) == 4:
-                continue
-
-            if any(part.isdigit() and len(part) == 4 for part in parts[1:]):
-                options.add(option)
-
-        return sorted(options)
 
     @staticmethod
     def _find_manifest_name(names: list[str]) -> str:

@@ -35,7 +35,6 @@ from PySide6.QtWidgets import (
 
 from app.core.cdumm_bridge import CdummBridge
 from app.core.cdumm_manager import CdummManager
-from app.core.dmm_manager import DmmManager
 from app.core.crimson_desert_archive import (
     CrimsonArchiveAnalysis,
     CrimsonDesertArchiveAnalyzer,
@@ -99,7 +98,6 @@ class MainWindow(QMainWindow):
         self.app_service = SteamAppService()
         self.crimson_archive_analyzer = CrimsonDesertArchiveAnalyzer()
         self.cdumm_manager = CdummManager()
-        self.dmm_manager = DmmManager()
         self.cdumm_bridge = CdummBridge()
         self.workshop_service = WorkshopService()
         self.install_metadata_service = InstallMetadataService()
@@ -480,9 +478,8 @@ class MainWindow(QMainWindow):
         nexus_tab = QWidget()
         nexus_layout = QVBoxLayout(nexus_tab)
         intro = QLabel(
-            "Crimson Desert Nexus/로컬 모드: 아카이브 구조를 분석해 "
-            "DMM 또는 CDUMM 중 적합한 방식을 안내합니다. "
-            "Character Creator 같은 multi-variant 모드는 DMM을 우선 사용합니다."
+            "Crimson Desert Nexus/로컬 모드: 아카이브를 먼저 분석한 뒤 "
+            "CDUMM의 snapshot/import/apply 엔진으로 적용합니다."
         )
         intro.setWordWrap(True)
         nexus_layout.addWidget(intro)
@@ -512,26 +509,8 @@ class MainWindow(QMainWindow):
         archive_row.addWidget(self.crimson_archive_analyze_btn)
         nexus_layout.addLayout(archive_row)
 
-        dmm_row = QHBoxLayout()
-        dmm_row.addWidget(QLabel("DMM"))
-        self.dmm_status_label = QLabel("확인 중...")
-        self.dmm_download_btn = QPushButton("DMM 다운로드 페이지")
-        self.dmm_download_btn.clicked.connect(self._open_dmm_download_page)
-        self.dmm_import_btn = QPushButton("DMM.exe 가져오기")
-        self.dmm_import_btn.clicked.connect(self._import_dmm_package)
-        self.dmm_open_btn = QPushButton("DMM 열기")
-        self.dmm_open_btn.clicked.connect(self._open_dmm_gui)
-        self.dmm_archive_folder_btn = QPushButton("현재 모드 위치 열기")
-        self.dmm_archive_folder_btn.clicked.connect(self._open_current_archive_location)
-        dmm_row.addWidget(self.dmm_status_label, 1)
-        dmm_row.addWidget(self.dmm_download_btn)
-        dmm_row.addWidget(self.dmm_import_btn)
-        dmm_row.addWidget(self.dmm_open_btn)
-        dmm_row.addWidget(self.dmm_archive_folder_btn)
-        nexus_layout.addLayout(dmm_row)
-
         cdumm_row = QHBoxLayout()
-        cdumm_row.addWidget(QLabel("CDUMM"))
+        cdumm_row.addWidget(QLabel("Crimson Desert 도구"))
         self.cdumm_status_label = QLabel("확인 중...")
         self.cdumm_install_btn = QPushButton("CDUMM 설치/업데이트")
         self.cdumm_install_btn.clicked.connect(self._install_managed_cdumm)
@@ -563,9 +542,8 @@ class MainWindow(QMainWindow):
         nexus_layout.addLayout(actions)
 
         warning = QLabel(
-            "DMM과 CDUMM을 동시에 Mount/Apply 상태로 운용하지 마세요. "
-            "한쪽에서 바닐라/Unmount로 되돌린 뒤 다른 매니저를 사용하세요. "
-            "Program Files 경로에서는 Windows 권한 경고가 나타날 수 있습니다."
+            "주의: 게임이 Program Files 아래에 있으면 Windows 권한 때문에 CDMods/overlay 쓰기가 실패할 수 있습니다. "
+            "문제가 나면 관리자 실행보다 Steam 라이브러리를 C:\\Games 같은 비보호 경로로 옮기는 방법을 권장합니다."
         )
         warning.setWordWrap(True)
         warning.setStyleSheet("QLabel { color: #b06b00; }")
@@ -626,7 +604,6 @@ class MainWindow(QMainWindow):
             ) or "")
         )
         self._refresh_cdumm_status()
-        self._refresh_dmm_status()
         self._log("INFO", "초기 설정을 불러왔습니다.")
 
     def _refresh_steam_tool_status(self) -> None:
@@ -749,122 +726,6 @@ class MainWindow(QMainWindow):
         save_settings(self.settings)
         self._log("INFO", "config/user_settings.json 에 설정을 저장했습니다.")
 
-
-    def _refresh_dmm_status(self) -> None:
-        resolved = self.dmm_manager.resolve(
-            str(self.settings.get("dmm_path", "") or "")
-        )
-        if resolved is None:
-            self.dmm_status_label.setText(
-                "○ DMM 미등록 — Nexus에서 최신 Windows DMM을 받은 뒤 가져오세요"
-            )
-            self.dmm_status_label.setToolTip(
-                f"관리형 위치: {self.dmm_manager.managed_root}"
-            )
-            self.dmm_open_btn.setEnabled(False)
-        else:
-            mode, path = resolved
-            self.dmm_status_label.setText(
-                f"● DMM 준비됨 ({'관리형' if mode == 'managed' else '외부'})"
-            )
-            self.dmm_status_label.setToolTip(str(path))
-            self.dmm_open_btn.setEnabled(True)
-
-    def _open_dmm_download_page(self) -> None:
-        QDesktopServices.openUrl(QUrl(self.dmm_manager.DOWNLOAD_URL))
-        self._log(
-            "INFO",
-            "DMM Nexus 다운로드 페이지를 열었습니다. "
-            "최신 Windows DMM을 받은 뒤 'DMM.exe 가져오기'를 사용하세요.",
-        )
-
-    def _import_dmm_package(self) -> None:
-        path, _ = QFileDialog.getOpenFileName(
-            self,
-            "Nexus에서 받은 DMM 파일 선택",
-            "",
-            "DMM (*.exe *.zip);;실행 파일 (*.exe);;ZIP (*.zip);;모든 파일 (*)",
-        )
-        if not path:
-            return
-
-        try:
-            managed = self.dmm_manager.import_local_package(Path(path))
-        except Exception as exc:
-            QMessageBox.warning(
-                self,
-                "DMM 가져오기 실패",
-                f"{type(exc).__name__}: {exc}",
-            )
-            return
-
-        self.settings["dmm_path"] = ""
-        save_settings(self.settings)
-        self._refresh_dmm_status()
-        self._log("INFO", f"관리형 DMM 준비 완료: {managed}")
-
-        QMessageBox.information(
-            self,
-            "DMM 준비 완료",
-            "DMM.exe를 WorkshopPilot 관리 영역에 복사했습니다.\n\n"
-            f"{managed}\n\n"
-            "이제 DMM을 열고 최초 설정에서 Crimson Desert 경로와 "
-            "Vanilla Vault/Baseline을 만든 뒤 모드 ZIP을 가져오세요.",
-        )
-
-    def _open_dmm_gui(self) -> None:
-        resolved = self.dmm_manager.resolve(
-            str(self.settings.get("dmm_path", "") or "")
-        )
-        if resolved is None:
-            QMessageBox.information(
-                self,
-                "DMM",
-                "DMM을 먼저 Nexus에서 다운로드한 뒤 'DMM.exe 가져오기'를 사용해 주세요.",
-            )
-            return
-
-        _, exe = resolved
-        try:
-            import subprocess
-            subprocess.Popen([str(exe)], cwd=str(exe.parent))
-        except Exception as exc:
-            QMessageBox.warning(
-                self,
-                "DMM 실행 실패",
-                f"{type(exc).__name__}: {exc}",
-            )
-            return
-        self._log("INFO", f"DMM 실행: {exe}")
-
-    def _open_current_archive_location(self) -> None:
-        text = self.crimson_archive_edit.text().strip()
-        if not text:
-            QMessageBox.information(
-                self,
-                "모드 위치",
-                "먼저 모드 아카이브를 선택해 주세요.",
-            )
-            return
-
-        path = Path(text)
-        if not path.exists():
-            QMessageBox.warning(
-                self,
-                "모드 위치",
-                f"파일을 찾을 수 없습니다:\n{path}",
-            )
-            return
-
-        import subprocess
-        try:
-            if sys.platform.startswith("win"):
-                subprocess.Popen(["explorer.exe", "/select,", str(path)])
-            else:
-                QDesktopServices.openUrl(QUrl.fromLocalFile(str(path.parent)))
-        except Exception:
-            QDesktopServices.openUrl(QUrl.fromLocalFile(str(path.parent)))
-
     def _refresh_cdumm_status(self) -> None:
         resolved = self.cdumm_manager.resolve(str(self.settings.get("cdumm_path", "") or ""))
         if resolved is None:
@@ -921,24 +782,9 @@ class MainWindow(QMainWindow):
             self._on_crimson_archive_analysis_error("아카이브 분석 결과 형식이 올바르지 않습니다."); return
         self.crimson_archive_analysis = payload
         self.crimson_analysis_detail.setPlainText(payload.to_display_text())
-        if payload.recommended_manager == "dmm":
-            self.crimson_progress_label.setText("분석 완료: DMM 권장 / 옵션 선택 필요")
-        else:
-            self.crimson_progress_label.setText(f"분석 완료: {payload.format_id}")
-        self._log(
-            "INFO",
-            f"[Crimson Desert] 모드 분석 완료: {payload.title} / "
-            f"format={payload.format_id} / manager={payload.recommended_manager} / "
-            f"nexus={payload.nexus_mod_id or '-'}",
-        )
+        self.crimson_progress_label.setText(f"분석 완료: {payload.format_id}")
+        self._log("INFO", f"[Crimson Desert] 모드 분석 완료: {payload.title} / format={payload.format_id} / nexus={payload.nexus_mod_id or '-'}")
         self._update_crimson_install_button()
-        if payload.requires_variant_choice:
-            self.crimson_install_btn.setToolTip(
-                "여러 Variant 중 하나를 골라야 하므로 CDUMM headless 자동 설치를 막았습니다. "
-                "DMM에서 옵션을 선택하세요."
-            )
-        else:
-            self.crimson_install_btn.setToolTip("")
 
     @Slot(str)
     def _on_crimson_archive_analysis_error(self, message: str) -> None:

@@ -167,38 +167,6 @@ v0.10은 v0.8 기반이며 v0.9 RimWorld 자동 로드순서 적용은 포함하
 
 게임이 Program Files 아래여서 쓰기 권한 문제가 생기면 관리자 실행보다 Steam 라이브러리를 비보호 경로로 옮기는 방법을 권장합니다.
 
-
-## v0.11 DMM 브리지
-
-Character Creator 같은 multi-variant 모드는 DMM을 우선 사용합니다.
-
-```text
-[DMM 다운로드 페이지]
-→ Nexus 로그인 후 최신 Windows DMM 다운로드
-→ [DMM.exe 가져오기]
-→ [DMM 열기]
-```
-
-관리형 DMM 위치:
-
-```text
-%LOCALAPPDATA%\WorkshopPilot\tools\dmm\DMM.exe
-```
-
-Character Creator 8.x처럼 ZIP 내부에:
-
-```text
-Human Female/0009/...
-Human Male/0009/...
-Orc Female/0009/...
-```
-
-구조가 있으면 `권장 설치기: DMM`, `옵션 선택 필요: 예`로 표시하고
-CDUMM headless 자동 설치는 비활성화합니다.
-
-DMM과 CDUMM을 동시에 적용 상태로 두지 마세요.
-한쪽에서 Vanilla/Unmount 후 다른 쪽을 사용하세요.
-
 ## 빠른 시작
 
 1. `SETUP_VENV.bat`
